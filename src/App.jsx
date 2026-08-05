@@ -10,79 +10,20 @@ import {
   CheckCircle,
   X,
   Search,
-  Plus,
   Trash2,
   Camera,
-  LogOut,
   Calendar,
   Filter,
   ArrowDownUp
 } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 
-const MOCK_MATERIALS = [
-  // Клапани АК (Аортальні)
-  { id: 'm_ak1', name: 'On-X Aortic', gtin: '00800000000001', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 2 },
-  { id: 'm_ak2', name: 'St. Jude Regent', gtin: '00800000000002', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 2 },
-  { id: 'm_ak3', name: 'St. Jude Masters', gtin: '00800000000003', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 1 },
-  { id: 'm_ak4', name: 'Carbomedics Aortic', gtin: '00800000000004', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 1 },
-  { id: 'm_ak5', name: 'Inspiris Resilia', gtin: '00800000000005', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 2 },
-  { id: 'm_ak6', name: 'Perimount Magna Ease', gtin: '00800000000006', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 2 },
-  { id: 'm_ak7', name: 'ATS Open Pivot', gtin: '00800000000007', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 1 },
-  { id: 'm_ak8', name: 'Epic Supra', gtin: '00800000000008', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 1 },
-  { id: 'm_ak9', name: 'Braile (АК)', gtin: '00800000000009', category: 'Імпланти', subcategory: 'Клапани АК', unit: 'шт', min_stock: 1 },
+// Ініціалізація Supabase клієнта
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Кільця МК (Мітральні)
-  { id: 'm_mk1', name: 'Physio II', gtin: '00800000000010', category: 'Імпланти', subcategory: 'Кільця МК', unit: 'шт', min_stock: 2 },
-  { id: 'm_mk2', name: 'Memo 3D', gtin: '00800000000011', category: 'Імпланти', subcategory: 'Кільця МК', unit: 'шт', min_stock: 1 },
-  { id: 'm_mk3', name: 'Medtronic CG Future', gtin: '00800000000012', category: 'Імпланти', subcategory: 'Кільця МК', unit: 'шт', min_stock: 1 },
-  { id: 'm_mk4', name: 'Profico (МК)', gtin: '00800000000013', category: 'Імпланти', subcategory: 'Кільця МК', unit: 'шт', min_stock: 1 },
-
-  // Кільця ТК (Трикуспідальні)
-  { id: 'm_tkr1', name: 'Carpentier-Edwards Tricuspid Ring', gtin: '00800000000020', category: 'Імпланти', subcategory: 'Кільця ТК', unit: 'шт', min_stock: 1 },
-  { id: 'm_tkr2', name: 'Profico (ТК)', gtin: '00800000000021', category: 'Імпланти', subcategory: 'Кільця ТК', unit: 'шт', min_stock: 1 },
-
-  // Протези ТК
-  { id: 'm_tk1', name: 'St. Jude Mechanical (ТК)', gtin: '00800000000030', category: 'Імпланти', subcategory: 'Клапани ТК', unit: 'шт', min_stock: 1 },
-  { id: 'm_tk2', name: 'Carbomedics Mechanical (ТК)', gtin: '00800000000031', category: 'Імпланти', subcategory: 'Клапани ТК', unit: 'шт', min_stock: 1 },
-  { id: 'm_tk3', name: 'On-X Mechanical (ТК)', gtin: '00800000000032', category: 'Імпланти', subcategory: 'Клапани ТК', unit: 'шт', min_stock: 1 },
-  { id: 'm_tk4', name: 'Epic Bioprosthesis', gtin: '00800000000033', category: 'Імпланти', subcategory: 'Клапани ТК', unit: 'шт', min_stock: 1 },
-  { id: 'm_tk5', name: 'Perimount Magna', gtin: '00800000000034', category: 'Імпланти', subcategory: 'Клапани ТК', unit: 'шт', min_stock: 1 },
-  { id: 'm_tk6', name: 'Inspiris Resilia (ТК)', gtin: '00800000000035', category: 'Імпланти', subcategory: 'Клапани ТК', unit: 'шт', min_stock: 1 },
-
-  // Протези аорти
-  { id: 'm_ao1', name: 'Hemashield Platinum (Maquet/Getinge)', gtin: '00800000000040', category: 'Імпланти', subcategory: 'Протези аорти', unit: 'шт', min_stock: 2 },
-  { id: 'm_ao2', name: 'Intergard (Getinge)', gtin: '00800000000041', category: 'Імпланти', subcategory: 'Протези аорти', unit: 'шт', min_stock: 1 },
-
-  // Інше для тесту
-  { id: 'm_oth1', name: 'Оксигенатор Maquet Quadrox-i', gtin: '00898765432109', category: 'Витратні', subcategory: 'Оксигенатори', unit: 'шт', min_stock: 5 },
-];
-
-const MOCK_STOCK = [
-  { id: 's1', material_id: 'm_ak1', lot_number: 'LOT-ONX-A21', serial_number: 'SN-998877', expiration_date: '2028-12-01', quantity: 3, purchase_price: 45000 },
-  { id: 's2', material_id: 'm_ak5', lot_number: 'LOT-INSP-23', serial_number: 'SN-112233', expiration_date: '2025-09-15', quantity: 2, purchase_price: 120000 },
-  { id: 's3', material_id: 'm_mk1', lot_number: 'LOT-PHY-28', serial_number: 'SN-V1122', expiration_date: '2027-08-10', quantity: 1, purchase_price: 25000 },
-  { id: 's4', material_id: 'm_tkr1', lot_number: 'LOT-CETR-30', serial_number: 'SN-T998', expiration_date: '2026-05-20', quantity: 1, purchase_price: 28000 },
-  { id: 's5', material_id: 'm_ao1', lot_number: 'LOT-HEMA-28', serial_number: 'SN-H554', expiration_date: '2027-11-01', quantity: 2, purchase_price: 32000 },
-  { id: 's6', material_id: 'm_oth1', lot_number: 'LOT-OXY4', serial_number: '', expiration_date: '2026-09-15', quantity: 6, purchase_price: 15000 },
-];
-
-const DB = {
-  get: (table) => {
-    try {
-      return JSON.parse(localStorage.getItem(`cardio_v2_${table}`) || '[]');
-    } catch (e) {
-      return [];
-    }
-  },
-  set: (table, data) => localStorage.setItem(`cardio_v2_${table}`, JSON.stringify(data)),
-  init: () => {
-    if (!localStorage.getItem('cardio_v2_materials')) DB.set('materials', MOCK_MATERIALS);
-    if (!localStorage.getItem('cardio_v2_stock_batches')) DB.set('stock_batches', MOCK_STOCK);
-    if (!localStorage.getItem('cardio_v2_operations')) DB.set('operations', []);
-    if (!localStorage.getItem('cardio_v2_expenses')) DB.set('expenses', []);
-  }
-};
-
+// Парсер GS1
 const parseGS1 = (code) => {
   let cleanCode = code.replace(/\\u001d|\\x1d|<GS>|\]d2/gi, String.fromCharCode(29));
   if (cleanCode.startsWith(']d2')) cleanCode = cleanCode.substring(3);
@@ -123,10 +64,10 @@ const parseGS1 = (code) => {
       const basicGtinMatch = cleanCode.match(/(?:01)(\d{14})/);
       if (basicGtinMatch) result.gtin = basicGtinMatch[1];
   }
-
   return result;
 };
 
+// Компонент Сканера
 const BarcodeScanner = ({ onScan, onClose }) => {
   const [error, setError] = useState('');
   const [isReady, setIsReady] = useState(false);
@@ -137,32 +78,18 @@ const BarcodeScanner = ({ onScan, onClose }) => {
     const initScanner = () => {
       setIsReady(true);
       try {
-        if (!window.Html5QrcodeScanner) {
-            setError("Бібліотека сканера не завантажилась. Спробуйте ще раз.");
-            return;
-        }
         html5QrcodeScanner = new window.Html5QrcodeScanner(
-          "reader", { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 }, false
+          "reader", { fps: 30, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 }, false
         );
         html5QrcodeScanner.render(
           (decodedText) => {
-            try {
-              const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-              const oscillator = audioCtx.createOscillator();
-              oscillator.type = 'sine';
-              oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
-              oscillator.connect(audioCtx.destination);
-              oscillator.start();
-              oscillator.stop(audioCtx.currentTime + 0.1);
-            } catch(e) {}
-            
             onScan(decodedText);
             html5QrcodeScanner.clear();
           },
-          (err) => {}
+          (err) => { /* ігноруємо помилки кадрів */ }
         );
       } catch (e) {
-        setError("Помилка камери. Використовуйте кнопки симуляції нижче.");
+        setError("Не вдалося запустити камеру. Перевірте дозволи.");
       }
     };
 
@@ -172,16 +99,13 @@ const BarcodeScanner = ({ onScan, onClose }) => {
       script.async = true;
       script.onload = initScanner;
       document.body.appendChild(script);
-      return () => {
-          if (html5QrcodeScanner) html5QrcodeScanner.clear().catch(()=>{});
-      }
     } else {
       initScanner();
     }
 
     return () => {
       if (html5QrcodeScanner) {
-        html5QrcodeScanner.clear().catch(()=>{});
+        html5QrcodeScanner.clear().catch(e => console.error(e));
       }
     };
   }, [onScan]);
@@ -211,25 +135,22 @@ const BarcodeScanner = ({ onScan, onClose }) => {
              <div className="absolute bottom-2 left-2 right-2 bg-slate-950/90 p-3 rounded-xl text-xs text-center border border-slate-700 shadow-xl">
                 <p className="mb-2 font-bold text-teal-400">Симуляція сканування (Емулятор)</p>
                 <div className="flex flex-col gap-2 justify-center">
-                    <button onClick={() => onScan('01008123456789011727120110LOT-A123\x1D21SN-998877')} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-white font-bold transition-colors">Скан: Клапан St.Jude</button>
+                    <button onClick={() => onScan('01008000000000011728120110LOT-ONX-A21\x1D21SN-998877')} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-white font-bold transition-colors">Скан: On-X</button>
                     <button onClick={() => onScan('01008987654321091726091510LOT-OXY4')} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-white font-bold transition-colors">Скан: Оксигенатор</button>
                 </div>
              </div>
           </div>
         )}
-        <p className="text-slate-400 text-center mt-6 text-sm max-w-xs">
-          Наведіть камеру на GS1 DataMatrix або штрих-код.
-        </p>
       </div>
     </div>
   );
 };
 
+// Компонент Дашборду
 const Dashboard = ({ state }) => {
   const totalValue = state.stock.reduce((sum, item) => sum + (item.quantity * item.purchase_price), 0);
-  const today = new Date();
-  const thirtyDays = new Date(today);
-  thirtyDays.setDate(today.getDate() + 30);
+  const thirtyDays = new Date();
+  thirtyDays.setDate(thirtyDays.getDate() + 30);
 
   const expiringItems = state.stock.filter(item => new Date(item.expiration_date) <= thirtyDays && item.quantity > 0);
   const lowStockItems = state.materials.filter(mat => {
@@ -305,7 +226,7 @@ const Dashboard = ({ state }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-slate-300">
-              {state.operations.slice().reverse().slice(0, 5).map(op => (
+              {state.operations.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5).map(op => (
                 <tr key={op.id} className="hover:bg-slate-800/50 transition-colors">
                   <td className="px-4 py-4 whitespace-nowrap">{new Date(op.operation_date).toLocaleDateString('uk-UA')}</td>
                   <td className="px-4 py-4 font-mono text-teal-400 font-bold">{op.operation_num}</td>
@@ -326,24 +247,12 @@ const Dashboard = ({ state }) => {
   );
 };
 
+// Компонент Списання
 const PostOpExpense = ({ state, dispatch }) => {
   const [showScanner, setShowScanner] = useState(false);
-  const [formData, setFormData] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('cardio_draft_op') || '{"operation_num":"", "patient_case_id":"", "operation_type":"CABG On-pump", "surgeon_name":"", "date":""}');
-    } catch { return {operation_num:"", patient_case_id:"", operation_type:"CABG On-pump", surgeon_name:"", date:""}; }
-  });
-  
-  const [expenses, setExpenses] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('cardio_draft_expenses') || '[]'); } catch { return []; }
-  });
-
+  const [formData, setFormData] = useState({operation_num:"", patient_case_id:"", operation_type:"CABG On-pump", surgeon_name:"", date:""});
+  const [expenses, setExpenses] = useState([]);
   const [scanMessage, setScanMessage] = useState(null);
-
-  useEffect(() => {
-    localStorage.setItem('cardio_draft_op', JSON.stringify(formData));
-    localStorage.setItem('cardio_draft_expenses', JSON.stringify(expenses));
-  }, [formData, expenses]);
 
   const handleScan = (code) => {
     setShowScanner(false);
@@ -402,39 +311,70 @@ const PostOpExpense = ({ state, dispatch }) => {
     setTimeout(() => setScanMessage(null), 3000);
   };
 
-  const submitOperation = () => {
+  const submitOperation = async () => {
     if (!formData.operation_num || !formData.patient_case_id) {
       alert("Заповніть номер операції та історію хвороби"); return;
     }
     
-    const opId = 'op_' + Date.now();
-    const newOp = {
-      id: opId,
-      operation_num: formData.operation_num,
-      patient_case_id: formData.patient_case_id,
-      operation_date: formData.date || new Date().toISOString().split('T')[0],
-      operation_type: formData.operation_type,
-      surgeon_name: formData.surgeon_name,
-      created_at: new Date().toISOString()
-    };
+    try {
+      // 1. Зберігаємо операцію в Supabase
+      const { data: opData, error: opError } = await supabase
+        .from('operations')
+        .insert([{
+          operation_num: formData.operation_num,
+          patient_case_id: formData.patient_case_id,
+          operation_date: formData.date || new Date().toISOString().split('T')[0],
+          operation_type: formData.operation_type,
+          surgeon_name: formData.surgeon_name
+        }])
+        .select();
 
-    const newExpenses = expenses.map(e => ({
-      id: 'e_' + Math.random().toString(36).substr(2, 9),
-      operation_id: opId,
-      stock_batch_id: e.stock_batch_id,
-      quantity: e.quantity,
-      created_at: new Date().toISOString()
-    }));
+      if (opError) throw opError;
+      const newOperation = opData[0];
 
-    dispatch({ type: 'ADD_OPERATION', payload: { operation: newOp, expenses: newExpenses } });
-    
-    setFormData({ operation_num: '', patient_case_id: '', operation_type: 'CABG On-pump', surgeon_name: '', date: '' });
-    setExpenses([]);
-    localStorage.removeItem('cardio_draft_op');
-    localStorage.removeItem('cardio_draft_expenses');
-    
-    setScanMessage({ type: 'success', text: '✅ Операцію проведено, залишки списано!' });
-    setTimeout(() => setScanMessage(null), 5000);
+      // 2. Зберігаємо витрати
+      const expensesToInsert = expenses.map(e => ({
+        operation_id: newOperation.id,
+        stock_batch_id: e.stock_batch_id,
+        quantity: e.quantity
+      }));
+
+      const { data: expData, error: expError } = await supabase
+        .from('expenses')
+        .insert(expensesToInsert)
+        .select();
+
+      if (expError) throw expError;
+
+      // 3. Оновлюємо залишки складу в базі
+      for (const item of expenses) {
+        const batch = state.stock.find(s => s.id === item.stock_batch_id);
+        const newQuantity = batch.quantity - item.quantity;
+        
+        const { error: updateError } = await supabase
+          .from('stock_batches')
+          .update({ quantity: newQuantity })
+          .eq('id', item.stock_batch_id);
+          
+        if (updateError) throw updateError;
+      }
+
+      // 4. Оновлюємо локальний UI
+      dispatch({ 
+        type: 'ADD_OPERATION', 
+        payload: { operation: newOperation, expenses: expData } 
+      });
+      
+      setFormData({ operation_num: '', patient_case_id: '', operation_type: 'CABG On-pump', surgeon_name: '', date: '' });
+      setExpenses([]);
+      
+      setScanMessage({ type: 'success', text: '✅ Операцію збережено в хмарі, залишки списано!' });
+      setTimeout(() => setScanMessage(null), 5000);
+
+    } catch (error) {
+      console.error("Supabase Error:", error);
+      alert("Помилка збереження в базу даних. Перевірте підключення.");
+    }
   };
 
   return (
@@ -527,6 +467,7 @@ const PostOpExpense = ({ state, dispatch }) => {
   );
 };
 
+// Компонент Приходу
 const StockIn = ({ state, dispatch }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [formData, setFormData] = useState({ gtin: '', lot: '', serial: '', exp: '', quantity: 1, price: '' });
@@ -561,25 +502,31 @@ const StockIn = ({ state, dispatch }) => {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!activeMaterial) { alert("Матеріал не знайдено. Спочатку додайте його в довідник."); return; }
     if (!formData.lot || !formData.exp || formData.quantity <= 0) { alert("Заповніть обов'язкові поля: LOT, Термін, Кількість."); return; }
 
     const batch = {
-      id: 'sb_' + Date.now(),
       material_id: activeMaterial.id,
       lot_number: formData.lot,
       serial_number: formData.serial,
       expiration_date: formData.exp,
       quantity: Number(formData.quantity),
-      purchase_price: Number(formData.price) || 0,
-      created_at: new Date().toISOString()
+      purchase_price: Number(formData.price) || 0
     };
 
-    dispatch({ type: 'ADD_STOCK', payload: batch });
-    setFormData({ gtin: '', lot: '', serial: '', exp: '', quantity: 1, price: '' });
-    setMessage({ type: 'success', text: '✅ Товар успішно оприбутковано на склад!' });
-    setTimeout(() => setMessage(null), 4000);
+    try {
+      const { data, error } = await supabase.from('stock_batches').insert([batch]).select();
+      if (error) throw error;
+      
+      dispatch({ type: 'ADD_STOCK', payload: data[0] });
+      setFormData({ gtin: '', lot: '', serial: '', exp: '', quantity: 1, price: '' });
+      setMessage({ type: 'success', text: '✅ Товар успішно оприбутковано на склад!' });
+      setTimeout(() => setMessage(null), 4000);
+    } catch (e) {
+      console.error(e);
+      setMessage({ type: 'error', text: 'Помилка збереження в базу даних.' });
+    }
   };
 
   return (
@@ -659,6 +606,7 @@ const StockIn = ({ state, dispatch }) => {
   );
 };
 
+// Компонент Інвентаризації
 const Inventory = ({ state }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
@@ -823,56 +771,64 @@ const Inventory = ({ state }) => {
   );
 };
 
+// Reducer для керування станом (тільки локальний стейт без localStorage)
 const reducer = (state, action) => {
   switch (action.type) {
-    case 'INIT': return action.payload;
+    case 'INIT': 
+      return action.payload;
     case 'ADD_STOCK':
-      const newStock = [...state.stock, action.payload];
-      DB.set('stock_batches', newStock);
-      return { ...state, stock: newStock };
+      return { ...state, stock: [...state.stock, action.payload] };
     case 'ADD_OPERATION':
       const { operation, expenses } = action.payload;
-      const updatedOps = [...state.operations, operation];
-      const updatedExp = [...state.expenses, ...expenses];
-      
       const updatedStock = state.stock.map(batch => {
          const used = expenses.find(e => e.stock_batch_id === batch.id);
          if (used) return { ...batch, quantity: batch.quantity - used.quantity };
          return batch;
       });
-
-      DB.set('operations', updatedOps);
-      DB.set('expenses', updatedExp);
-      DB.set('stock_batches', updatedStock);
-      
-      return { ...state, operations: updatedOps, expenses: updatedExp, stock: updatedStock };
+      return { ...state, operations: [...state.operations, operation], expenses: [...state.expenses, ...expenses], stock: updatedStock };
     default: return state;
   }
 };
 
+// Головний компонент додатку
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [state, dispatch] = React.useReducer(reducer, { materials: [], stock: [], operations: [], expenses: [] });
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    DB.init();
-    dispatch({
-      type: 'INIT',
-      payload: {
-        materials: DB.get('materials'),
-        stock: DB.get('stock_batches'),
-        operations: DB.get('operations'),
-        expenses: DB.get('expenses')
+    async function fetchCloudData() {
+      try {
+        const [matRes, stockRes, opRes, expRes] = await Promise.all([
+          supabase.from('materials').select('*'),
+          supabase.from('stock_batches').select('*'),
+          supabase.from('operations').select('*'),
+          supabase.from('expenses').select('*')
+        ]);
+
+        dispatch({
+          type: 'INIT',
+          payload: {
+            materials: matRes.data || [],
+            stock: stockRes.data || [],
+            operations: opRes.data || [],
+            expenses: expRes.data || []
+          }
+        });
+      } catch (error) {
+        console.error("Помилка завантаження бази даних:", error);
+      } finally {
+        setIsLoaded(true);
       }
-    });
-    setIsLoaded(true);
+    }
+    
+    fetchCloudData();
   }, []);
 
   if (!isLoaded) return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-4 text-teal-500">
       <HeartPulse size={48} className="animate-pulse" />
-      <span className="font-bold tracking-widest uppercase text-sm">Завантаження...</span>
+      <span className="font-bold tracking-widest uppercase text-sm">З'єднання з хмарою...</span>
     </div>
   );
 
