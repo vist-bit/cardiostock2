@@ -1141,19 +1141,7 @@ export default function App() {
      return currentUser.permissions.includes(tabId);
   };
 
-  if (!isLoaded) return (
-    <div className="min-h-screen bg-[#020817] flex flex-col items-center justify-center gap-4 text-teal-500">
-      <HeartPulse size={48} className="animate-pulse" />
-      <span className="font-bold tracking-widest uppercase text-sm">З'єднання з хмарою...</span>
-      
-      {/* ДЕТЕКТОР КЛЮЧІВ */}
-      <div className="mt-8 p-4 bg-slate-900 border border-slate-700 rounded-xl text-left font-mono text-xs text-slate-300">
-        <p className="mb-2 text-rose-400 font-bold">Діагностика змінних (Vercel):</p>
-        <p>URL: {supabaseUrl ? `✅ Є (${supabaseUrl.substring(0, 15)}...)` : '❌ ПОРОЖНЬО'}</p>
-        <p>KEY: {supabaseKey ? `✅ Є (починається з ${supabaseKey.substring(0, 5)}...)` : '❌ ПОРОЖНЬО'}</p>
-      </div>
-    </div>
-  );
+  if (!isLoaded) return <div className="min-h-screen bg-[#020817] flex items-center justify-center"><HeartPulse size={48} className="animate-pulse text-teal-500" /></div>;
 
   return (
     <div className="min-h-screen bg-[#020817] text-slate-200 pb-24 md:pb-0 font-sans">
