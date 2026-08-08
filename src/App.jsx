@@ -1,21 +1,11 @@
+/* STREAMING_CHUNK: Setup, Icons, Charts and DB Init */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  HeartPulse, 
-  ScanBarcode, 
-  PackagePlus, 
-  Activity, 
-  AlertTriangle, 
-  Database, 
-  Download, 
-  CheckCircle,
-  X,
-  Search,
-  Trash2,
-  Camera,
-  Calendar,
-  Filter,
-  ArrowDownUp
+  HeartPulse, ScanBarcode, PackagePlus, Activity, AlertTriangle, Database, Download, CheckCircle, 
+  X, Search, Plus, Trash2, Camera, Calendar, Filter, ArrowDownUp, Lock, Unlock, Edit2, Clock, 
+  PieChart as PieChartIcon, BarChart3, Settings, Users, Shield
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { createClient } from '@supabase/supabase-js';
 
 // Ініціалізація Supabase клієнта
@@ -23,19 +13,18 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Парсер GS1
-const parseGS1 = (code) => {
+/* STREAMING_CHUNK: GS1 Parser and Scanner */
+const parseBarcode = (code) => {
   let cleanCode = code.replace(/\\u001d|\\x1d|<GS>|\]d2/gi, String.fromCharCode(29));
   if (cleanCode.startsWith(']d2')) cleanCode = cleanCode.substring(3);
   
-  let result = { gtin: '', lot: '', exp: '', serial: '', raw: code };
+  let result = { code: '', lot: '', exp: '', serial: '', raw: code };
   let remaining = cleanCode;
 
   try {
     while (remaining.length > 0) {
       if (remaining.startsWith('01') && remaining.length >= 16) {
-        result.gtin = remaining.substring(2, 16);
-        remaining = remaining.substring(16);
+        result.code = remaining.substring(2, 16); remaining = remaining.substring(16);
       } else if (remaining.startsWith('17') && remaining.length >= 8) {
         let dateStr = remaining.substring(2, 8);
         let year = parseInt(dateStr.substring(0, 2), 10);
@@ -56,41 +45,31 @@ const parseGS1 = (code) => {
         remaining = remaining.substring(nextGS + 1);
       }
     }
-  } catch (e) {
-    console.error("GS1 Parse Error:", e);
-  }
+  } catch (e) { console.error("Parse Error:", e); }
   
-  if (!result.gtin) {
+  if (!result.code) {
       const basicGtinMatch = cleanCode.match(/(?:01)(\d{14})/);
-      if (basicGtinMatch) result.gtin = basicGtinMatch[1];
+      if (basicGtinMatch) result.code = basicGtinMatch[1];
+      else result.code = cleanCode; 
   }
   return result;
 };
 
-// Компонент Сканера
 const BarcodeScanner = ({ onScan, onClose }) => {
   const [error, setError] = useState('');
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     let html5QrcodeScanner;
-
     const initScanner = () => {
       setIsReady(true);
       try {
-        html5QrcodeScanner = new window.Html5QrcodeScanner(
-          "reader", { fps: 30, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 }, false
-        );
+        html5QrcodeScanner = new window.Html5QrcodeScanner("reader", { fps: 30, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 }, false);
         html5QrcodeScanner.render(
-          (decodedText) => {
-            onScan(decodedText);
-            html5QrcodeScanner.clear();
-          },
-          (err) => { /* ігноруємо помилки кадрів */ }
+          (decodedText) => { onScan(decodedText); html5QrcodeScanner.clear(); },
+          (err) => {}
         );
-      } catch (e) {
-        setError("Не вдалося запустити камеру. Перевірте дозволи.");
-      }
+      } catch (e) { setError("Не вдалося запустити камеру. Перевірте дозволи."); }
     };
 
     if (!window.Html5QrcodeScanner) {
@@ -99,44 +78,29 @@ const BarcodeScanner = ({ onScan, onClose }) => {
       script.async = true;
       script.onload = initScanner;
       document.body.appendChild(script);
-    } else {
-      initScanner();
-    }
+    } else { initScanner(); }
 
-    return () => {
-      if (html5QrcodeScanner) {
-        html5QrcodeScanner.clear().catch(e => console.error(e));
-      }
-    };
+    return () => { if (html5QrcodeScanner) html5QrcodeScanner.clear().catch(e => console.error(e)); };
   }, [onScan]);
 
   return (
     <div className="fixed inset-0 bg-slate-950/95 z-50 flex flex-col backdrop-blur-sm">
       <div className="p-4 flex justify-between items-center text-white bg-slate-900 border-b border-slate-800 shadow-lg">
-        <h2 className="text-lg font-bold flex items-center gap-2">
-          <ScanBarcode className="text-teal-400" /> Сканування коду
-        </h2>
-        <button onClick={onClose} className="p-2 bg-slate-800 rounded-full hover:bg-slate-700 transition-colors">
-          <X size={24} />
-        </button>
+        <h2 className="text-lg font-bold flex items-center gap-2"><ScanBarcode className="text-teal-400" /> Сканування коду</h2>
+        <button onClick={onClose} className="p-2 bg-slate-800 rounded-full hover:bg-slate-700 transition-colors"><X size={24} /></button>
       </div>
-      
       <div className="flex-1 flex flex-col justify-center items-center p-4">
         {error ? (
-          <div className="text-rose-400 bg-rose-400/10 p-4 rounded-xl text-center max-w-sm border border-rose-900/50">
-            <AlertTriangle className="mx-auto mb-2" size={32} />
-            {error}
-          </div>
+          <div className="text-rose-400 bg-rose-400/10 p-4 rounded-xl text-center max-w-sm border border-rose-900/50"><AlertTriangle className="mx-auto mb-2" size={32} />{error}</div>
         ) : (
           <div className="w-full max-w-sm bg-slate-900 rounded-2xl overflow-hidden shadow-2xl relative border border-slate-700 min-h-[300px]">
              <div id="reader" className="w-full bg-black"></div>
              {!isReady && <div className="absolute inset-0 flex items-center justify-center text-teal-500 animate-pulse">Ініціалізація камери...</div>}
-             
              <div className="absolute bottom-2 left-2 right-2 bg-slate-950/90 p-3 rounded-xl text-xs text-center border border-slate-700 shadow-xl">
-                <p className="mb-2 font-bold text-teal-400">Симуляція сканування (Емулятор)</p>
+                <p className="mb-2 font-bold text-teal-400">Емулятор сканера</p>
                 <div className="flex flex-col gap-2 justify-center">
-                    <button onClick={() => onScan('01008000000000011728120110LOT-ONX-A21\x1D21SN-998877')} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-white font-bold transition-colors">Скан: On-X</button>
-                    <button onClick={() => onScan('01008987654321091726091510LOT-OXY4')} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-white font-bold transition-colors">Скан: Оксигенатор</button>
+                    <button onClick={() => onScan('01008000000000011728120110LOT-ONX-A21\x1D21SN-998877')} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-white font-bold transition-colors">Скан: On-X GS1</button>
+                    <button onClick={() => onScan('REF-CUSTOM-VALVE')} className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg text-white font-bold transition-colors">Скан: Невідомий артикул</button>
                 </div>
              </div>
           </div>
@@ -146,130 +110,276 @@ const BarcodeScanner = ({ onScan, onClose }) => {
   );
 };
 
-// Компонент Дашборду
-const Dashboard = ({ state }) => {
-  const totalValue = state.stock.reduce((sum, item) => sum + (item.quantity * item.purchase_price), 0);
-  const thirtyDays = new Date();
-  thirtyDays.setDate(thirtyDays.getDate() + 30);
+/* STREAMING_CHUNK: Dashboard Component */
+const Dashboard = ({ state, dispatch }) => {
+  const [selectedOp, setSelectedOp] = useState(null);
 
-  const expiringItems = state.stock.filter(item => new Date(item.expiration_date) <= thirtyDays && item.quantity > 0);
+  const totalItems = state.stock.reduce((sum, item) => sum + item.quantity, 0);
+  
+  const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const operationsLast30Days = state.operations.filter(op => new Date(op.operation_date) >= thirtyDaysAgo).length;
+
+  const thirtyDaysFuture = new Date(); thirtyDaysFuture.setDate(thirtyDaysFuture.getDate() + 30);
+  const expiringItems = state.stock.filter(item => new Date(item.expiration_date) <= thirtyDaysFuture && item.quantity > 0);
   const lowStockItems = state.materials.filter(mat => {
     const totalQty = state.stock.filter(s => s.material_id === mat.id).reduce((sum, s) => sum + s.quantity, 0);
     return totalQty < mat.min_stock;
   });
 
+  const pieData = useMemo(() => {
+    const categories = {};
+    state.stock.forEach(batch => {
+       if(batch.quantity <= 0) return;
+       const mat = state.materials.find(m => m.id === batch.material_id);
+       if(!mat) return;
+       categories[mat.subcategory] = (categories[mat.subcategory] || 0) + batch.quantity;
+    });
+    return Object.entries(categories).map(([name, value]) => ({ name, value })).filter(d => d.value > 0).sort((a,b)=>b.value - a.value);
+  }, [state.stock, state.materials]);
+  
+  const COLORS = ['#0d9488', '#3b82f6', '#8b5cf6', '#f59e0b', '#ec4899', '#64748b'];
+
+  const barData = useMemo(() => {
+    const months = {};
+    state.operations.forEach(op => {
+      const month = op.operation_date.substring(0, 7); 
+      months[month] = (months[month] || 0) + 1;
+    });
+    return Object.entries(months).map(([name, value]) => ({ name, value })).sort((a,b) => a.name.localeCompare(b.name)).slice(-6);
+  }, [state.operations]);
+
+  const handleDeleteOp = async () => {
+    try {
+       const opId = selectedOp.id;
+       const expsToRestore = state.expenses.filter(e => e.operation_id === opId);
+       
+       // В Supabase налаштовано ON DELETE CASCADE, тому при видаленні операції,
+       // автоматично видаляться пов'язані витрати (expenses).
+       const { error } = await supabase.from('operations').delete().eq('id', opId);
+       if(error) throw error;
+
+       // Повертаємо залишки на склад
+       for (const exp of expsToRestore) {
+          const batch = state.stock.find(s => s.id === exp.stock_batch_id);
+          if (batch) {
+             await supabase.from('stock_batches').update({ quantity: batch.quantity + exp.quantity }).eq('id', batch.id);
+          }
+       }
+
+       dispatch({ type: 'DELETE_OPERATION', payload: opId });
+       setSelectedOp(null);
+    } catch(e) {
+       console.error("Помилка видалення операції:", e);
+       alert("Помилка при видаленні операції.");
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 p-5 rounded-3xl shadow-lg relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-10"><Activity size={64}/></div>
-          <div className="flex items-center gap-3 text-slate-400 mb-2 relative z-10">
-            <Activity className="text-teal-400" size={18} />
-            <h3 className="font-semibold text-xs uppercase tracking-widest">Капітал складу</h3>
-          </div>
-          <div className="text-3xl font-black text-white relative z-10 tracking-tight">
-            {totalValue.toLocaleString('uk-UA')} <span className="text-xl text-teal-500 font-medium">₴</span>
-          </div>
-          <p className="text-xs text-slate-400 mt-2 relative z-10 font-medium">Всього партій: {state.stock.filter(s => s.quantity > 0).length}</p>
+          <div className="absolute top-0 right-0 p-4 opacity-10"><Database size={64}/></div>
+          <div className="flex items-center gap-3 text-slate-400 mb-2 relative z-10"><Database className="text-teal-400" size={18} /><h3 className="font-semibold text-xs uppercase tracking-widest">Загальний залишок</h3></div>
+          <div className="text-3xl font-black text-white relative z-10 tracking-tight">{totalItems} <span className="text-lg text-slate-500 font-medium">шт</span></div>
+          <p className="text-xs text-slate-400 mt-2 relative z-10"><span className="text-teal-400 font-bold">{operationsLast30Days}</span> операцій за останні 30 днів</p>
         </div>
-
         <div className={`border p-5 rounded-3xl shadow-lg relative overflow-hidden ${expiringItems.length > 0 ? 'bg-gradient-to-br from-rose-950 to-slate-900 border-rose-900/50' : 'bg-gradient-to-br from-slate-800 to-slate-900 border-slate-700'}`}>
           <div className="absolute top-0 right-0 p-4 opacity-10"><Calendar size={64} className={expiringItems.length > 0 ? 'text-rose-500' : 'text-slate-500'}/></div>
-          <div className="flex items-center gap-3 text-slate-400 mb-2 relative z-10">
-            <Calendar className={expiringItems.length > 0 ? 'text-rose-400' : 'text-slate-400'} size={18} />
-            <h3 className="font-semibold text-xs uppercase tracking-widest text-slate-300">FEFO Контроль</h3>
-          </div>
-          <div className={`text-3xl font-black tracking-tight relative z-10 ${expiringItems.length > 0 ? 'text-rose-400' : 'text-white'}`}>
-            {expiringItems.length} <span className="text-sm text-slate-400 font-medium tracking-normal">партіям &lt; 30 днів</span>
-          </div>
-          {expiringItems.length > 0 && (
-            <div className="mt-3 text-xs text-rose-200/80 space-y-1.5 relative z-10">
-              {expiringItems.slice(0, 2).map((item, i) => {
-                const mat = state.materials.find(m => m.id === item.material_id);
-                return <div key={i} className="truncate bg-rose-950/50 px-2 py-1 rounded-md border border-rose-900/50">• {mat?.name}</div>;
-              })}
-            </div>
-          )}
+          <div className="flex items-center gap-3 text-slate-400 mb-2 relative z-10"><Calendar className={expiringItems.length > 0 ? 'text-rose-400' : 'text-slate-400'} size={18} /><h3 className="font-semibold text-xs uppercase tracking-widest text-slate-300">FEFO Контроль</h3></div>
+          <div className={`text-3xl font-black tracking-tight relative z-10 ${expiringItems.length > 0 ? 'text-rose-400' : 'text-white'}`}>{expiringItems.length} <span className="text-sm text-slate-400 font-medium tracking-normal">партіям &lt; 30 днів</span></div>
         </div>
-
         <div className={`border p-5 rounded-3xl shadow-lg relative overflow-hidden ${lowStockItems.length > 0 ? 'bg-gradient-to-br from-amber-950 to-slate-900 border-amber-900/50' : 'bg-gradient-to-br from-slate-800 to-slate-900 border-slate-700'}`}>
           <div className="absolute top-0 right-0 p-4 opacity-10"><AlertTriangle size={64} className={lowStockItems.length > 0 ? 'text-amber-500' : 'text-slate-500'}/></div>
-          <div className="flex items-center gap-3 text-slate-400 mb-2 relative z-10">
-            <AlertTriangle className={lowStockItems.length > 0 ? 'text-amber-400' : 'text-slate-400'} size={18} />
-            <h3 className="font-semibold text-xs uppercase tracking-widest text-slate-300">Дефіцит</h3>
-          </div>
-          <div className={`text-3xl font-black tracking-tight relative z-10 ${lowStockItems.length > 0 ? 'text-amber-400' : 'text-white'}`}>
-            {lowStockItems.length} <span className="text-sm text-slate-400 font-medium tracking-normal">позицій &lt; норми</span>
-          </div>
-           {lowStockItems.length > 0 && (
-            <div className="mt-3 text-xs text-amber-200/80 space-y-1.5 relative z-10">
-              {lowStockItems.slice(0, 2).map((mat, i) => (
-                <div key={i} className="truncate bg-amber-950/50 px-2 py-1 rounded-md border border-amber-900/50">• {mat.name} (Min: {mat.min_stock})</div>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-3 text-slate-400 mb-2 relative z-10"><AlertTriangle className={lowStockItems.length > 0 ? 'text-amber-400' : 'text-slate-400'} size={18} /><h3 className="font-semibold text-xs uppercase tracking-widest text-slate-300">Дефіцит</h3></div>
+          <div className={`text-3xl font-black tracking-tight relative z-10 ${lowStockItems.length > 0 ? 'text-amber-400' : 'text-white'}`}>{lowStockItems.length} <span className="text-sm text-slate-400 font-medium tracking-normal">позицій &lt; норми</span></div>
         </div>
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl">
+            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2"><PieChartIcon className="text-teal-500" size={18}/> Розподіл залишків (шт)</h3>
+            <div className="h-64">
+              {pieData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                      {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(value) => value + ' шт'} contentStyle={{backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#fff'}} itemStyle={{color: '#fff'}}/>
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : <div className="h-full flex items-center justify-center text-slate-600">Склад порожній</div>}
+            </div>
+         </div>
+         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl">
+            <h3 className="text-sm font-bold text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2"><BarChart3 className="text-teal-500" size={18}/> Динаміка операцій (останні 6 міс)</h3>
+            <div className="h-64">
+              {barData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={barData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip cursor={{fill: '#1e293b'}} formatter={(value) => value + ' опер.'} contentStyle={{backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#fff'}}/>
+                    <Bar dataKey="value" fill="#0d9488" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <div className="h-full flex items-center justify-center text-slate-600">Немає проведених операцій</div>}
+            </div>
+         </div>
+      </div>
+
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl">
-        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-          <Activity size={20} className="text-teal-500" /> Останні проведені операції
-        </h3>
+        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Activity size={20} className="text-teal-500" /> Останні проведені операції</h3>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-950">
-              <tr>
-                <th className="px-4 py-3 rounded-tl-xl">Дата</th>
-                <th className="px-4 py-3">№ Опер.</th>
-                <th className="px-4 py-3">Пацієнт (ІБ)</th>
-                <th className="px-4 py-3 rounded-tr-xl">Тип</th>
-              </tr>
-            </thead>
+          <table className="w-full text-sm text-left"><thead className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-950"><tr><th className="px-4 py-3 rounded-tl-xl">Дата</th><th className="px-4 py-3">№ Опер.</th><th className="px-4 py-3">Пацієнт (ІБ)</th><th className="px-4 py-3 rounded-tr-xl">Тип</th></tr></thead>
             <tbody className="divide-y divide-slate-800 text-slate-300">
               {state.operations.slice().sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5).map(op => (
-                <tr key={op.id} className="hover:bg-slate-800/50 transition-colors">
+                <tr key={op.id} onClick={() => setSelectedOp(op)} className="hover:bg-slate-800/50 transition-colors cursor-pointer group">
                   <td className="px-4 py-4 whitespace-nowrap">{new Date(op.operation_date).toLocaleDateString('uk-UA')}</td>
-                  <td className="px-4 py-4 font-mono text-teal-400 font-bold">{op.operation_num}</td>
+                  <td className="px-4 py-4 font-mono text-teal-400 font-bold group-hover:text-teal-300">{op.operation_num}</td>
                   <td className="px-4 py-4 font-medium">{op.patient_case_id}</td>
                   <td className="px-4 py-4 text-slate-400">{op.operation_type}</td>
                 </tr>
               ))}
-              {state.operations.length === 0 && (
-                <tr>
-                  <td colSpan="4" className="px-4 py-12 text-center text-slate-500">Історія операцій порожня</td>
-                </tr>
-              )}
+              {state.operations.length === 0 && <tr><td colSpan="4" className="px-4 py-12 text-center text-slate-500">Історія операцій порожня</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
+
+      {selectedOp && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+             <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2"><Activity className="text-teal-500"/> Деталі операції {selectedOp.operation_num}</h3>
+                <button onClick={()=>setSelectedOp(null)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full"><X size={18}/></button>
+             </div>
+             <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                   <div><p className="text-slate-500 text-xs uppercase tracking-widest mb-1">Дата</p><p className="font-bold text-white">{new Date(selectedOp.operation_date).toLocaleDateString('uk-UA')}</p></div>
+                   <div><p className="text-slate-500 text-xs uppercase tracking-widest mb-1">ІБ Пацієнта</p><p className="font-bold text-white">{selectedOp.patient_case_id}</p></div>
+                   <div className="col-span-2"><p className="text-slate-500 text-xs uppercase tracking-widest mb-1">Тип втручання</p><p className="font-bold text-white">{selectedOp.operation_type}</p></div>
+                </div>
+                <div className="mt-4 pt-4 border-t border-slate-800">
+                   <p className="text-slate-500 text-xs uppercase tracking-widest mb-3 font-bold">Списані матеріали</p>
+                   <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                      {state.expenses.filter(e => e.operation_id === selectedOp.id).map(exp => {
+                         const batch = state.stock.find(s => s.id === exp.stock_batch_id) || state.writeoffs.find(w=>w.stock_batch_id === exp.stock_batch_id); 
+                         const mat = state.materials.find(m => m.id === batch?.material_id);
+                         return (
+                           <div key={exp.id} className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
+                             <div>
+                               <p className="text-sm font-bold text-white">{mat?.name || 'Невідомий матеріал'}</p>
+                               <div className="flex gap-2 items-center mt-1">
+                                  {batch?.size && <span className="text-[10px] bg-teal-900/30 text-teal-400 px-1.5 rounded font-bold">Р: {batch.size}</span>}
+                                  <span className="text-[10px] text-slate-400 font-mono">LOT: {batch?.lot_number || '-'}</span>
+                               </div>
+                             </div>
+                             <div className="font-black text-teal-400">{exp.quantity} шт</div>
+                           </div>
+                         )
+                      })}
+                   </div>
+                </div>
+             </div>
+             <div className="p-5 border-t border-slate-800 bg-slate-950/50 flex gap-3">
+                <button onClick={handleDeleteOp} className="flex-1 bg-rose-950 text-rose-400 hover:bg-rose-900 hover:text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2 transition-colors border border-rose-900/50"><Trash2 size={18}/> Скасувати та видалити</button>
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-// Компонент Списання
+/* STREAMING_CHUNK: Components PostOp, StockIn, Catalog, Inventory, Users */
+const SearchableDropdown = ({ state, onSelect }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) setIsOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredBatches = useMemo(() => {
+    if (!searchTerm) return [];
+    let results = [];
+    state.stock.forEach(batch => {
+      if (batch.quantity <= 0) return;
+      const mat = state.materials.find(m => m.id === batch.material_id);
+      if (!mat) return;
+      const searchStr = `${mat.name} ${mat.code} ${batch.lot_number} ${batch.serial_number || ''} ${batch.size || ''}`.toLowerCase();
+      if (searchStr.includes(searchTerm.toLowerCase())) {
+        results.push({ batch, mat });
+      }
+    });
+    return results.slice(0, 10);
+  }, [searchTerm, state]);
+
+  return (
+    <div ref={wrapperRef} className="relative w-full">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+        <input 
+          type="text" value={searchTerm} onChange={(e) => {setSearchTerm(e.target.value); setIsOpen(true);}}
+          onFocus={() => setIsOpen(true)}
+          placeholder="Пошук зі складу (Назва, LOT, Розмір)..."
+          className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 pl-10 pr-4 text-white focus:ring-2 focus:ring-teal-500 outline-none placeholder:text-slate-600"
+        />
+      </div>
+      {isOpen && searchTerm && (
+        <div className="absolute z-50 w-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
+          {filteredBatches.length > 0 ? filteredBatches.map(({batch, mat}) => (
+            <div key={batch.id} onClick={() => { onSelect(batch, mat); setSearchTerm(''); setIsOpen(false); }} className="p-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700/50 last:border-0 flex justify-between items-center group">
+              <div>
+                <p className="text-sm font-bold text-white group-hover:text-teal-300 transition-colors">{mat.name} {batch.size && <span className="ml-1 text-teal-400 text-xs">Розмір: {batch.size}</span>}</p>
+                <p className="text-[10px] text-slate-400 font-mono mt-0.5">LOT: {batch.lot_number} {batch.serial_number ? `| SN: ${batch.serial_number}` : ''}</p>
+              </div>
+              <div className="text-xs font-black bg-slate-900 px-2 py-1 rounded text-teal-400">{batch.quantity} шт</div>
+            </div>
+          )) : <div className="p-4 text-center text-sm text-slate-500">Нічого не знайдено на залишках</div>}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PostOpExpense = ({ state, dispatch }) => {
   const [showScanner, setShowScanner] = useState(false);
-  const [formData, setFormData] = useState({operation_num:"", patient_case_id:"", operation_type:"CABG On-pump", surgeon_name:"", date:""});
+  const [formData, setFormData] = useState({operation_num:"", patient_case_id:"", operation_type:"CABG On-pump", date:""});
   const [expenses, setExpenses] = useState([]);
   const [scanMessage, setScanMessage] = useState(null);
 
-  const handleScan = (code) => {
-    setShowScanner(false);
-    const parsed = parseGS1(code);
-    
-    if (!parsed.gtin) {
-      setScanMessage({ type: 'error', text: 'Помилка: не знайдено GTIN у коді.' });
-      setTimeout(() => setScanMessage(null), 4000);
-      return;
-    }
+  const showMsg = (type, text) => { setScanMessage({type, text}); setTimeout(() => setScanMessage(null), 4000); };
 
-    const material = state.materials.find(m => m.gtin === parsed.gtin);
-    if (!material) {
-       setScanMessage({ type: 'error', text: `Матеріал з GTIN ${parsed.gtin} не зареєстрований в базі.` });
-       setTimeout(() => setScanMessage(null), 4000);
-       return;
-    }
+  const handleManualAdd = (batch, material) => {
+    setExpenses(prev => {
+      const existing = prev.find(e => e.stock_batch_id === batch.id);
+      if (existing) {
+        if (existing.quantity + 1 > batch.quantity) { showMsg('error', 'Перевищено доступний залишок!'); return prev; }
+        showMsg('success', `Кількість збільшено: ${material.name}`);
+        return prev.map(e => e.stock_batch_id === batch.id ? { ...e, quantity: e.quantity + 1 } : e);
+      } else {
+        showMsg('success', `Успішно додано: ${material.name}`);
+        return [...prev, { id: 'exp_' + Date.now(), stock_batch_id: batch.id, material_id: material.id, name: material.name, lot: batch.lot_number, serial: batch.serial_number, size: batch.size, quantity: 1, max: batch.quantity }];
+      }
+    });
+  };
+
+  const handleScan = (codeStr) => {
+    setShowScanner(false);
+    const parsed = parseBarcode(codeStr);
+    if (!parsed.code) { showMsg('error', 'Помилка: не знайдено артикул у коді.'); return; }
+
+    const material = state.materials.find(m => m.code === parsed.code);
+    if (!material) { showMsg('error', `Матеріал з кодом ${parsed.code} відсутній у довіднику.`); return; }
 
     let batch = null;
     if (parsed.lot) batch = state.stock.find(s => s.material_id === material.id && s.lot_number === parsed.lot && s.quantity > 0);
@@ -279,382 +389,381 @@ const PostOpExpense = ({ state, dispatch }) => {
        if (batches.length > 0) batch = batches[0];
     }
 
-    if (!batch) {
-      setScanMessage({ type: 'error', text: `Склад порожній: "${material.name}" немає в наявності.` });
-      setTimeout(() => setScanMessage(null), 4000);
-      return;
-    }
-
-    setExpenses(prev => {
-      const existing = prev.find(e => e.stock_batch_id === batch.id);
-      if (existing) {
-        if (existing.quantity + 1 > batch.quantity) {
-           setScanMessage({ type: 'error', text: 'Помилка: Перевищено доступний залишок на складі!' });
-           return prev;
-        }
-        setScanMessage({ type: 'success', text: `Кількість збільшено: ${material.name}` });
-        return prev.map(e => e.stock_batch_id === batch.id ? { ...e, quantity: e.quantity + 1 } : e);
-      } else {
-        setScanMessage({ type: 'success', text: `Успішно додано: ${material.name}` });
-        return [...prev, { 
-          id: 'exp_' + Date.now(), 
-          stock_batch_id: batch.id, 
-          material_id: material.id,
-          name: material.name,
-          lot: batch.lot_number,
-          serial: batch.serial_number,
-          quantity: 1, 
-          max: batch.quantity 
-        }];
-      }
-    });
-    setTimeout(() => setScanMessage(null), 3000);
+    if (!batch) { showMsg('error', `Склад порожній: "${material.name}" немає в наявності.`); return; }
+    handleManualAdd(batch, material);
   };
 
   const submitOperation = async () => {
-    if (!formData.operation_num || !formData.patient_case_id) {
-      alert("Заповніть номер операції та історію хвороби"); return;
-    }
+    if (!formData.operation_num || !formData.patient_case_id) { showMsg('error', "Заповніть номер операції та ІБ"); return; }
     
     try {
-      // 1. Зберігаємо операцію в Supabase
-      const { data: opData, error: opError } = await supabase
+       // Збереження операції
+       const { data: opData, error: opError } = await supabase
         .from('operations')
         .insert([{
           operation_num: formData.operation_num,
           patient_case_id: formData.patient_case_id,
           operation_date: formData.date || new Date().toISOString().split('T')[0],
-          operation_type: formData.operation_type,
-          surgeon_name: formData.surgeon_name
-        }])
-        .select();
+          operation_type: formData.operation_type
+        }]).select();
 
-      if (opError) throw opError;
-      const newOperation = opData[0];
+       if(opError) throw opError;
+       const newOp = opData[0];
 
-      // 2. Зберігаємо витрати
-      const expensesToInsert = expenses.map(e => ({
-        operation_id: newOperation.id,
-        stock_batch_id: e.stock_batch_id,
-        quantity: e.quantity
-      }));
+       // Збереження витрат
+       const expensesToInsert = expenses.map(e => ({
+          operation_id: newOp.id,
+          stock_batch_id: e.stock_batch_id,
+          quantity: e.quantity
+       }));
+       const { data: expData, error: expError } = await supabase.from('expenses').insert(expensesToInsert).select();
+       if(expError) throw expError;
 
-      const { data: expData, error: expError } = await supabase
-        .from('expenses')
-        .insert(expensesToInsert)
-        .select();
+       // Оновлення залишків
+       for (const item of expenses) {
+          const batch = state.stock.find(s => s.id === item.stock_batch_id);
+          const newQty = batch.quantity - item.quantity;
+          await supabase.from('stock_batches').update({ quantity: newQty }).eq('id', batch.id);
+       }
 
-      if (expError) throw expError;
-
-      // 3. Оновлюємо залишки складу в базі
-      for (const item of expenses) {
-        const batch = state.stock.find(s => s.id === item.stock_batch_id);
-        const newQuantity = batch.quantity - item.quantity;
-        
-        const { error: updateError } = await supabase
-          .from('stock_batches')
-          .update({ quantity: newQuantity })
-          .eq('id', item.stock_batch_id);
-          
-        if (updateError) throw updateError;
-      }
-
-      // 4. Оновлюємо локальний UI
-      dispatch({ 
-        type: 'ADD_OPERATION', 
-        payload: { operation: newOperation, expenses: expData } 
-      });
-      
-      setFormData({ operation_num: '', patient_case_id: '', operation_type: 'CABG On-pump', surgeon_name: '', date: '' });
-      setExpenses([]);
-      
-      setScanMessage({ type: 'success', text: '✅ Операцію збережено в хмарі, залишки списано!' });
-      setTimeout(() => setScanMessage(null), 5000);
-
-    } catch (error) {
-      console.error("Supabase Error:", error);
-      alert("Помилка збереження в базу даних. Перевірте підключення.");
+       dispatch({ type: 'ADD_OPERATION', payload: { operation: newOp, expenses: expData } });
+       setFormData({ operation_num: '', patient_case_id: '', operation_type: 'CABG On-pump', date: '' });
+       setExpenses([]);
+       showMsg('success', '✅ Операцію збережено в хмарі, матеріали списано!');
+    } catch(e) {
+       console.error(e);
+       showMsg('error', 'Помилка збереження бази даних.');
     }
   };
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-500">
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
-      
       {scanMessage && (
-        <div className={`p-4 rounded-2xl border flex items-center gap-3 shadow-lg transition-all ${scanMessage.type === 'error' ? 'bg-rose-950/80 border-rose-900 text-rose-200' : 'bg-teal-950/80 border-teal-900 text-teal-200'}`}>
+        <div className={`p-4 rounded-2xl border flex items-center gap-3 shadow-lg ${scanMessage.type === 'error' ? 'bg-rose-950/80 border-rose-900 text-rose-200' : 'bg-teal-950/80 border-teal-900 text-teal-200'}`}>
           {scanMessage.type === 'error' ? <AlertTriangle size={20} className="text-rose-500" /> : <CheckCircle size={20} className="text-teal-500" />}
           <span className="font-medium text-sm">{scanMessage.text}</span>
         </div>
       )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl">
-        <h2 className="text-xl font-black text-white mb-8 flex items-center gap-3">
-          <div className="p-2 bg-rose-500/10 rounded-xl text-rose-500"><Activity size={24} /></div>
-          Списання на операцію
-        </h2>
-        
+        <h2 className="text-xl font-black text-white mb-8 flex items-center gap-3"><div className="p-2 bg-rose-500/10 rounded-xl text-rose-500"><Activity size={24} /></div>Списання на операцію</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">№ Операції *</label>
-            <input type="text" value={formData.operation_num} onChange={e => setFormData({...formData, operation_num: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none transition-all placeholder:text-slate-600 font-mono" placeholder="Напр. 1024" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">ID Пацієнта (ІБ) *</label>
-            <input type="text" value={formData.patient_case_id} onChange={e => setFormData({...formData, patient_case_id: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none transition-all placeholder:text-slate-600 font-mono" placeholder="ІБ-2026/45" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Тип операції</label>
-            <select value={formData.operation_type} onChange={e => setFormData({...formData, operation_type: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all appearance-none cursor-pointer">
-              <option>CABG On-pump</option><option>CABG Off-pump</option><option>AVR (Аортальний клапан)</option><option>MVR (Мітральний клапан)</option><option>Bentall</option><option>Комбінована</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Дата</label>
-            <input type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none transition-all color-scheme-dark" />
-          </div>
+          <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">№ Операції *</label><input type="text" value={formData.operation_num} onChange={e => setFormData({...formData, operation_num: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="Напр. 1024" /></div>
+          <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">ID Пацієнта (ІБ) *</label><input type="text" value={formData.patient_case_id} onChange={e => setFormData({...formData, patient_case_id: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="ІБ-2026/45" /></div>
+          <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Тип операції</label><select value={formData.operation_type} onChange={e => setFormData({...formData, operation_type: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none appearance-none"><option>CABG On-pump</option><option>CABG Off-pump</option><option>AVR (Аортальний клапан)</option><option>MVR (Мітральний клапан)</option><option>Bentall</option><option>Комбінована</option></select></div>
+          <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Дата</label><input type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none" style={{colorScheme: 'dark'}} /></div>
         </div>
 
         <div className="bg-slate-950/50 p-5 rounded-2xl border border-slate-800 shadow-inner">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-5">
-             <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">Використані матеріали</h3>
-             <button onClick={() => setShowScanner(true)} className="w-full sm:w-auto bg-teal-600 hover:bg-teal-500 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(13,148,136,0.3)]">
-               <Camera size={18} /> Сканувати код
-             </button>
+          <div className="flex flex-col gap-4 mb-5">
+             <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">Додати матеріали:</h3>
+             <div className="flex flex-col sm:flex-row gap-3">
+                <SearchableDropdown state={state} onSelect={handleManualAdd} />
+                <button onClick={() => setShowScanner(true)} className="w-full sm:w-auto bg-teal-600 hover:bg-teal-500 text-white px-5 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shrink-0"><Camera size={18} /> Сканувати</button>
+             </div>
           </div>
 
           {expenses.length === 0 ? (
-            <div className="text-center py-12 text-slate-600 border-2 border-dashed border-slate-800 rounded-2xl">
-               <ScanBarcode size={48} className="mx-auto mb-4 opacity-30" />
-               <p className="text-sm font-medium">Відскануйте DataMatrix на упаковці імпланту</p>
-            </div>
+            <div className="text-center py-10 text-slate-600 border-2 border-dashed border-slate-800 rounded-2xl"><ScanBarcode size={48} className="mx-auto mb-4 opacity-30" /><p className="text-sm font-medium">Шукайте у списку або відскануйте код</p></div>
           ) : (
             <div className="space-y-3">
               {expenses.map((item) => (
-                <div key={item.id} className="flex flex-col sm:flex-row justify-between sm:items-center bg-slate-900 p-4 rounded-xl border border-slate-700 shadow-md gap-4 group">
+                <div key={item.id} className="flex flex-col sm:flex-row justify-between sm:items-center bg-slate-900 p-4 rounded-xl border border-slate-700 shadow-md gap-4">
                   <div className="flex-1">
                     <p className="font-bold text-white text-sm">{item.name}</p>
-                    <div className="flex gap-3 mt-1.5">
+                    <div className="flex gap-3 items-center mt-1.5">
+                      {item.size && <span className="text-[10px] px-2 py-0.5 bg-teal-900/40 text-teal-400 rounded border border-teal-800 font-bold">Розмір: {item.size}</span>}
                       {item.lot && <span className="text-[10px] px-2 py-0.5 bg-slate-800 text-slate-400 rounded border border-slate-700 font-mono">LOT: {item.lot}</span>}
                       {item.serial && <span className="text-[10px] px-2 py-0.5 bg-slate-800 text-slate-400 rounded border border-slate-700 font-mono">SN: {item.serial}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-4 justify-between sm:justify-end">
                     <div className="flex items-center bg-slate-950 rounded-lg border border-slate-800">
-                      <button onClick={() => setExpenses(prev => prev.map(e => e.id === item.id ? {...e, quantity: Math.max(1, e.quantity - 1)} : e))} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-l-lg transition-colors">-</button>
+                      <button onClick={() => setExpenses(prev => prev.map(e => e.id === item.id ? {...e, quantity: Math.max(1, e.quantity - 1)} : e))} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-l-lg">-</button>
                       <div className="px-3 py-1.5 text-white text-sm font-bold min-w-[3rem] text-center">{item.quantity} <span className="text-slate-500 text-xs font-normal">/ {item.max}</span></div>
-                      <button onClick={() => setExpenses(prev => prev.map(e => e.id === item.id ? {...e, quantity: Math.min(e.max, e.quantity + 1)} : e))} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-r-lg transition-colors">+</button>
+                      <button onClick={() => setExpenses(prev => prev.map(e => e.id === item.id ? {...e, quantity: Math.min(e.max, e.quantity + 1)} : e))} className="px-3 py-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-r-lg">+</button>
                     </div>
-                    <button onClick={() => setExpenses(prev => prev.filter(e => e.id !== item.id))} className="p-2 text-rose-500 hover:bg-rose-500/20 rounded-lg transition-colors">
-                      <Trash2 size={20} />
-                    </button>
+                    <button onClick={() => setExpenses(prev => prev.filter(e => e.id !== item.id))} className="p-2 text-rose-500 hover:bg-rose-500/20 rounded-lg"><Trash2 size={20} /></button>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
-
-        <button 
-          onClick={submitOperation}
-          disabled={expenses.length === 0}
-          className={`w-full mt-6 py-4 rounded-2xl font-black text-lg transition-all duration-300 ${expenses.length > 0 ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-white shadow-[0_10px_30px_rgba(13,148,136,0.3)] hover:scale-[1.01] hover:shadow-[0_10px_40px_rgba(13,148,136,0.4)]' : 'bg-slate-950 text-slate-700 border border-slate-800 cursor-not-allowed'}`}
-        >
-          Завершити операцію ({expenses.reduce((s,e) => s + e.quantity, 0)} шт)
-        </button>
+        <button onClick={submitOperation} disabled={expenses.length === 0} className={`w-full mt-6 py-4 rounded-2xl font-black text-lg transition-all duration-300 ${expenses.length > 0 ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-white shadow-lg hover:scale-[1.01]' : 'bg-slate-950 text-slate-700 border border-slate-800 cursor-not-allowed'}`}>Завершити операцію ({expenses.reduce((s,e) => s + e.quantity, 0)} шт)</button>
       </div>
     </div>
   );
 };
 
-// Компонент Приходу
 const StockIn = ({ state, dispatch }) => {
   const [showScanner, setShowScanner] = useState(false);
-  const [formData, setFormData] = useState({ gtin: '', lot: '', serial: '', exp: '', quantity: 1, price: '' });
+  const [formData, setFormData] = useState({ code: '', lot: '', serial: '', size: '', exp: '', quantity: 1 });
   const [message, setMessage] = useState(null);
 
-  const activeMaterial = state.materials.find(m => m.gtin === formData.gtin);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
 
-  const handleScan = (code) => {
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) setShowDropdown(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const activeMaterial = state.materials.find(m => m.code === formData.code);
+  const showMsg = (type, text) => { setMessage({type, text}); setTimeout(() => setMessage(null), 4000); };
+
+  const filteredMaterials = useMemo(() => {
+    if (!searchQuery) return state.materials.slice(0, 10);
+    const query = searchQuery.toLowerCase();
+    return state.materials.filter(m => 
+      m.name.toLowerCase().includes(query) || m.code.toLowerCase().includes(query)
+    ).slice(0, 10);
+  }, [searchQuery, state.materials]);
+
+  const handleScan = (codeStr) => {
     setShowScanner(false);
-    const parsed = parseGS1(code);
-    if (!parsed.gtin) {
-      setMessage({ type: 'error', text: 'Неможливо розпізнати код.' }); 
-      setTimeout(() => setMessage(null), 3000);
-      return;
-    }
+    const parsed = parseBarcode(codeStr);
+    if (!parsed.code) { showMsg('error', 'Неможливо розпізнати код.'); return; }
     
-    setFormData({
-      gtin: parsed.gtin,
-      lot: parsed.lot || '',
-      serial: parsed.serial || '',
-      exp: parsed.exp || '',
-      quantity: 1,
-      price: ''
-    });
+    setFormData({ code: parsed.code, lot: parsed.lot || '', serial: parsed.serial || '', size: '', exp: parsed.exp || '', quantity: 1 });
     
-    const mat = state.materials.find(m => m.gtin === parsed.gtin);
+    const mat = state.materials.find(m => m.code === parsed.code);
     if (mat) {
-      setMessage({ type: 'success', text: `Розпізнано: ${mat.name}` });
+      setSearchQuery(mat.name);
+      showMsg('success', `Розпізнано: ${mat.name}`);
     } else {
-      setMessage({ type: 'warning', text: `Новий GTIN: ${parsed.gtin}. Потрібно додати в довідник.` });
+      setSearchQuery(parsed.code);
+      showMsg('warning', `Новий код: ${parsed.code}. Спочатку додайте його в довідник.`);
     }
-    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleSelectMaterial = (mat) => {
+    setFormData({ ...formData, code: mat.code });
+    setSearchQuery(mat.name);
+    setShowDropdown(false);
   };
 
   const handleSave = async () => {
-    if (!activeMaterial) { alert("Матеріал не знайдено. Спочатку додайте його в довідник."); return; }
-    if (!formData.lot || !formData.exp || formData.quantity <= 0) { alert("Заповніть обов'язкові поля: LOT, Термін, Кількість."); return; }
+    if (!activeMaterial) { showMsg('error', "Матеріал не знайдено. Спочатку додайте його в довідник."); return; }
+    if (!formData.lot || !formData.exp || formData.quantity <= 0) { showMsg('error', "Заповніть обов'язкові поля: LOT, Термін, Кількість."); return; }
+    if (formData.serial && state.stock.some(s => s.serial_number === formData.serial && s.quantity > 0)) {
+        showMsg('error', "Помилка: Такий серійний номер вже є на складі!"); return;
+    }
 
-    const batch = {
-      material_id: activeMaterial.id,
-      lot_number: formData.lot,
-      serial_number: formData.serial,
-      expiration_date: formData.exp,
-      quantity: Number(formData.quantity),
-      purchase_price: Number(formData.price) || 0
-    };
-
+    const batch = { material_id: activeMaterial.id, lot_number: formData.lot, serial_number: formData.serial, size: formData.size, expiration_date: formData.exp, quantity: Number(formData.quantity) };
+    
     try {
-      const { data, error } = await supabase.from('stock_batches').insert([batch]).select();
-      if (error) throw error;
-      
-      dispatch({ type: 'ADD_STOCK', payload: data[0] });
-      setFormData({ gtin: '', lot: '', serial: '', exp: '', quantity: 1, price: '' });
-      setMessage({ type: 'success', text: '✅ Товар успішно оприбутковано на склад!' });
-      setTimeout(() => setMessage(null), 4000);
-    } catch (e) {
-      console.error(e);
-      setMessage({ type: 'error', text: 'Помилка збереження в базу даних.' });
+       const { data, error } = await supabase.from('stock_batches').insert([batch]).select();
+       if(error) throw error;
+
+       dispatch({ type: 'ADD_STOCK', payload: data[0] });
+       setFormData({ code: '', lot: '', serial: '', size: '', exp: '', quantity: 1 });
+       setSearchQuery(''); 
+       showMsg('success', '✅ Товар успішно оприбутковано на склад!');
+    } catch(e) {
+       console.error(e);
+       showMsg('error', "Помилка бази даних");
     }
   };
 
   return (
     <div className="max-w-2xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
-      
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl">
          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-            <h2 className="text-xl font-black text-white flex items-center gap-3">
-              <div className="p-2 bg-teal-500/10 rounded-xl text-teal-500"><PackagePlus size={24} /></div>
-              Прихід товару
-            </h2>
-            <button onClick={() => setShowScanner(true)} className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-teal-400 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors border border-slate-700">
-               <Camera size={18} /> Сканувати
-            </button>
+            <h2 className="text-xl font-black text-white flex items-center gap-3"><div className="p-2 bg-teal-500/10 rounded-xl text-teal-500"><PackagePlus size={24} /></div>Прихід товару</h2>
+            <button onClick={() => setShowScanner(true)} className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-teal-400 px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors border border-slate-700"><Camera size={18} /> Сканувати</button>
          </div>
-
-         {message && (
-          <div className={`p-4 rounded-xl border mb-6 flex items-center gap-3 text-sm font-medium ${message.type === 'error' ? 'bg-rose-950/80 border-rose-900 text-rose-200' : message.type === 'warning' ? 'bg-amber-950/80 border-amber-900 text-amber-200' : 'bg-teal-950/80 border-teal-900 text-teal-200'}`}>
-            <AlertTriangle size={18}/> {message.text}
-          </div>
-         )}
+         {message && <div className={`p-4 rounded-xl border mb-6 flex items-center gap-3 text-sm font-medium ${message.type === 'error' ? 'bg-rose-950/80 border-rose-900 text-rose-200' : message.type === 'warning' ? 'bg-amber-950/80 border-amber-900 text-amber-200' : 'bg-teal-950/80 border-teal-900 text-teal-200'}`}><AlertTriangle size={18}/> {message.text}</div>}
 
          <div className="space-y-5">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">GTIN Код *</label>
-              <input type="text" value={formData.gtin} onChange={e => setFormData({...formData, gtin: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-teal-400 focus:ring-2 focus:ring-teal-500 outline-none transition-all font-mono font-bold tracking-widest" placeholder="00000000000000" />
+            <div className="space-y-1.5" ref={dropdownRef}>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Матеріал (Пошук або Код) *</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                <input 
+                  type="text" value={searchQuery} 
+                  onChange={e => { setSearchQuery(e.target.value); setFormData({ ...formData, code: e.target.value }); setShowDropdown(true); }}
+                  onFocus={() => setShowDropdown(true)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-teal-400 focus:ring-2 focus:ring-teal-500 outline-none font-bold tracking-wide" 
+                  placeholder="Введіть назву або відскануйте код..." 
+                />
+                {showDropdown && (
+                  <div className="absolute z-50 w-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
+                    {filteredMaterials.length > 0 ? filteredMaterials.map(mat => (
+                      <div key={mat.id} onClick={() => handleSelectMaterial(mat)} className="p-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700/50 last:border-0 flex justify-between items-center group">
+                        <div>
+                          <p className="text-sm font-bold text-white group-hover:text-teal-300 transition-colors">{mat.name}</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{mat.subcategory}</p>
+                        </div>
+                        <div className="text-[10px] text-teal-400 font-mono bg-slate-900 px-2 py-1 rounded border border-slate-700">{mat.code}</div>
+                      </div>
+                    )) : <div className="p-4 text-center text-sm text-slate-400">Матеріал не знайдено. Буде використано введений код.</div>}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {activeMaterial && (
-              <div className="p-4 bg-teal-950/20 border border-teal-900/50 rounded-xl flex items-center gap-4">
-                 <div className="w-12 h-12 bg-slate-900 rounded-lg flex items-center justify-center border border-slate-800">
-                    <Database className="text-teal-500 opacity-50" size={24} />
-                 </div>
-                 <div>
-                   <p className="text-white font-bold text-sm">{activeMaterial.name}</p>
-                   <p className="text-xs text-slate-400 mt-1">{activeMaterial.category} › {activeMaterial.subcategory}</p>
-                 </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-5">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">LOT Партія *</label>
-                <input type="text" value={formData.lot} onChange={e => setFormData({...formData, lot: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="ABC-123" />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Серійний № (Опц)</label>
-                <input type="text" value={formData.serial} onChange={e => setFormData({...formData, serial: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="SN-000" />
-              </div>
-            </div>
-
+            {activeMaterial && <div className="p-4 bg-teal-950/20 border border-teal-900/50 rounded-xl flex items-center gap-4"><div className="w-12 h-12 bg-slate-900 rounded-lg flex items-center justify-center border border-slate-800"><Database className="text-teal-500 opacity-50" size={24} /></div><div><p className="text-white font-bold text-sm">{activeMaterial.name}</p><p className="text-xs text-slate-400 mt-1">{activeMaterial.subcategory}</p></div></div>}
+            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-               <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Придатний до *</label>
-                  <input type="date" value={formData.exp} onChange={e => setFormData({...formData, exp: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none color-scheme-dark" />
-               </div>
-               <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Кількість *</label>
-                  <input type="number" min="1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-bold text-center text-lg" />
-               </div>
-               <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Ціна (₴)</label>
-                  <input type="number" step="100" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none" placeholder="0" />
-               </div>
+              <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">LOT Партія *</label><input type="text" value={formData.lot} onChange={e => setFormData({...formData, lot: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="ABC-123" /></div>
+              <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Серійний № (Опц)</label><input type="text" value={formData.serial} onChange={e => setFormData({...formData, serial: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="SN-000" /></div>
+              <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-teal-400 uppercase tracking-widest pl-1">Розмір (Опц)</label><input type="text" value={formData.size} onChange={e => setFormData({...formData, size: e.target.value})} className="w-full bg-slate-950 border border-teal-900/50 rounded-xl p-3.5 text-teal-400 focus:ring-2 focus:ring-teal-500 outline-none font-bold" placeholder="Напр. 25, 2-0" /></div>
             </div>
 
-            <button 
-              onClick={handleSave}
-              className="w-full mt-6 bg-slate-800 hover:bg-teal-600 text-white font-black py-4 rounded-2xl transition-all duration-300 hover:shadow-[0_10px_30px_rgba(13,148,136,0.3)] border border-slate-700 hover:border-teal-500"
-            >
-              Оприбуткувати товар
-            </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+               <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Придатний до *</label><input type="date" value={formData.exp} onChange={e => setFormData({...formData, exp: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none" style={{colorScheme:'dark'}}/></div>
+               <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Кількість *</label><input type="number" min="1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-bold text-center text-lg" /></div>
+            </div>
+            <button onClick={handleSave} className="w-full mt-6 bg-slate-800 hover:bg-teal-600 text-white font-black py-4 rounded-2xl transition-all duration-300 border border-slate-700 hover:border-teal-500">Оприбуткувати товар</button>
          </div>
       </div>
     </div>
   );
 };
 
-// Компонент Інвентаризації
-const Inventory = ({ state }) => {
+const Catalog = ({ state, dispatch }) => {
+  const [showScanner, setShowScanner] = useState(false);
+  const [showSubcatModal, setShowSubcatModal] = useState(false);
+  const [newSubcat, setNewSubcat] = useState('');
+  const [formData, setFormData] = useState({ id: '', name: '', code: '', subcategory: (state.subcategories||[])[0]?.name||'', min_stock: 1 });
+  const [isEditing, setIsEditing] = useState(false);
+
+  const handleSave = async () => {
+    if(!formData.name || !formData.code) return;
+    try {
+      if(isEditing) { 
+        const { error } = await supabase.from('materials').update(formData).eq('id', formData.id);
+        if(error) throw error;
+        dispatch({ type: 'UPDATE_MATERIAL', payload: formData }); 
+      } 
+      else { 
+        const newMat = { name: formData.name, code: formData.code, subcategory: formData.subcategory, min_stock: formData.min_stock };
+        const { data, error } = await supabase.from('materials').insert([newMat]).select();
+        if(error) throw error;
+        dispatch({ type: 'ADD_MATERIAL', payload: data[0] }); 
+      }
+      setFormData({ id: '', name: '', code: '', subcategory: (state.subcategories||[])[0]?.name||'', min_stock: 1 }); setIsEditing(false);
+    } catch(e) { console.error(e); alert("Помилка бази даних"); }
+  };
+
+  const handleDelete = async (id) => {
+     if(state.stock.some(s => s.material_id === id)) { alert("Неможливо видалити: матеріал має залишки на складі."); return; }
+     try {
+       await supabase.from('materials').delete().eq('id', id);
+       dispatch({ type: 'DELETE_MATERIAL', payload: id });
+     } catch(e) { console.error(e); }
+  };
+  const handleScan = (codeStr) => {
+    setShowScanner(false);
+    const parsed = parseBarcode(codeStr);
+    if(parsed.code) setFormData({...formData, code: parsed.code});
+  };
+  const handleAddSubcat = async () => {
+     if(!newSubcat.trim()) return;
+     try {
+       const { data, error } = await supabase.from('subcategories').insert([{name: newSubcat.trim()}]).select();
+       if(error) throw error;
+       dispatch({type: 'ADD_SUBCATEGORY', payload: data[0]});
+       setNewSubcat('');
+     } catch(e) { console.error(e); }
+  };
+  const handleDeleteSubcat = async (id) => {
+      const sub = state.subcategories.find(s=>s.id === id);
+      if(state.materials.some(m => m.subcategory === sub.name)) {
+          alert("Ця підкатегорія використовується в матеріалах. Змініть їх перед видаленням."); return;
+      }
+      try {
+        await supabase.from('subcategories').delete().eq('id', id);
+        dispatch({type: 'DELETE_SUBCATEGORY', payload: id});
+      } catch(e) { console.error(e); }
+  };
+
+  return (
+    <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-6">
+      {showScanner && <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
+      
+      {showSubcatModal && (
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden p-6">
+               <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">Підкатегорії</h3>
+                  <button onClick={()=>setShowSubcatModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+               </div>
+               <div className="flex gap-2 mb-6">
+                  <input type="text" value={newSubcat} onChange={e=>setNewSubcat(e.target.value)} placeholder="Нова підкатегорія..." className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"/>
+                  <button onClick={handleAddSubcat} className="bg-teal-600 hover:bg-teal-500 text-white px-4 rounded-xl font-bold">Додати</button>
+               </div>
+               <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+                  {(state.subcategories||[]).map(sc => (
+                     <div key={sc.id} className="flex justify-between items-center bg-slate-800 p-3 rounded-xl">
+                        <span className="text-sm font-bold text-white">{sc.name}</span>
+                        <button onClick={()=>handleDeleteSubcat(sc.id)} className="text-rose-400 hover:text-rose-300 p-1"><Trash2 size={16}/></button>
+                     </div>
+                  ))}
+               </div>
+            </div>
+         </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl h-fit">
+          <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><Edit2 className="text-teal-500"/> {isEditing ? 'Редагування' : 'Новий матеріал'}</h3>
+          <div className="space-y-4">
+            <div><label className="text-[10px] font-bold text-slate-400 uppercase pl-1">Назва *</label><input type="text" value={formData.name} onChange={e=>setFormData({...formData,name:e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"/></div>
+            <div><label className="text-[10px] font-bold text-slate-400 uppercase pl-1">Артикул / Код / GTIN *</label><div className="flex gap-2"><input type="text" value={formData.code} onChange={e=>setFormData({...formData,code:e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-teal-400 font-mono outline-none"/><button onClick={()=>setShowScanner(true)} className="bg-slate-800 px-4 rounded-xl hover:bg-slate-700 text-teal-400"><Camera size={20}/></button></div></div>
+            <div>
+               <label className="text-[10px] font-bold text-slate-400 uppercase flex justify-between items-center mb-1 pl-1">Підкатегорія <button onClick={() => setShowSubcatModal(true)} className="text-teal-400 hover:text-teal-300 flex items-center gap-1 bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800"><Edit2 size={10}/> Налаштувати</button></label>
+               <select value={formData.subcategory} onChange={e=>setFormData({...formData,subcategory:e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none appearance-none">
+                  {(state.subcategories||[]).map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+               </select>
+            </div>
+            <div><label className="text-[10px] font-bold text-slate-400 uppercase pl-1">Мін. залишок (шт)</label><input type="number" value={formData.min_stock} onChange={e=>setFormData({...formData,min_stock:Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none font-bold text-center"/></div>
+          </div>
+          <button onClick={handleSave} className="w-full mt-6 bg-teal-600 hover:bg-teal-500 text-white font-bold py-3.5 rounded-xl transition-colors">{isEditing ? 'Оновити' : 'Зберегти'}</button>
+          {isEditing && <button onClick={()=>{setIsEditing(false); setFormData({id:'',name:'',code:'',subcategory:(state.subcategories||[])[0]?.name||'',min_stock:1})}} className="w-full mt-3 bg-slate-800 text-slate-300 font-bold py-3.5 rounded-xl">Скасувати</button>}
+        </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl lg:col-span-2">
+          <table className="w-full text-sm text-left"><thead className="text-[10px] font-bold text-slate-400 uppercase bg-slate-950"><tr><th className="px-5 py-4">Назва / Код</th><th className="px-5 py-4">Підкатегорія</th><th className="px-5 py-4 text-right">Дії</th></tr></thead>
+            <tbody className="divide-y divide-slate-800/50 text-slate-300">
+              {state.materials.map(mat => (
+                <tr key={mat.id} className="hover:bg-slate-800/30">
+                  <td className="px-5 py-4"><div className="font-bold text-white text-sm">{mat.name}</div><div className="text-[10px] text-teal-400 font-mono mt-1">{mat.code}</div></td>
+                  <td className="px-5 py-4"><div className="text-xs font-bold text-slate-300 bg-slate-800 inline-block px-2 py-1 rounded-md border border-slate-700">{mat.subcategory}</div></td>
+                  <td className="px-5 py-4 text-right"><button onClick={()=>{setFormData({...mat}); setIsEditing(true); window.scrollTo({top:0});}} className="p-2 text-slate-400 hover:text-teal-400 bg-slate-950 rounded-lg mr-2"><Edit2 size={16}/></button><button onClick={()=>handleDelete(mat.id)} className="p-2 text-slate-400 hover:text-rose-400 bg-slate-950 rounded-lg"><Trash2 size={16}/></button></td>
+                </tr>
+              ))}
+            </tbody></table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Inventory = ({ state, dispatch, isReadOnly }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
   const [sortBy, setSortBy] = useState('exp_asc');
+  const [writeOffModal, setWriteOffModal] = useState(null);
+  const [historyModal, setHistoryModal] = useState(null);
 
-  const subcategories = useMemo(() => {
-    const unique = new Set(state.materials.map(m => m.subcategory));
-    return ['All', ...Array.from(unique)].sort();
-  }, [state.materials]);
-
-  const exportCSV = () => {
-    let csvContent = "Дата;№ Операції;ID Пацієнта;Тип;Хірург;Матеріал;GTIN;LOT;Серійний;Кількість;Ціна;Сума\n";
-    state.operations.forEach(op => {
-      const opExpenses = state.expenses.filter(e => e.operation_id === op.id);
-      opExpenses.forEach(exp => {
-        const batch = state.stock.find(s => s.id === exp.stock_batch_id) || {};
-        const mat = state.materials.find(m => m.id === batch.material_id) || {};
-        const row = [
-          op.operation_date, op.operation_num, op.patient_case_id, op.operation_type, op.surgeon_name,
-          mat.name || '-', mat.gtin || '', batch.lot_number || '', batch.serial_number || '',
-          exp.quantity, batch.purchase_price || 0, (exp.quantity * (batch.purchase_price || 0))
-        ].map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-        csvContent += row + "\n";
-      });
-    });
-
-    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `cardio_expenses_${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  const subcategories = useMemo(() => ['All', ...Array.from(new Set(state.materials.map(m => m.subcategory)))].sort(), [state.materials]);
 
   const inventoryView = useMemo(() => {
     let result = [];
     state.materials.forEach(mat => {
       if (filterCategory !== 'All' && mat.subcategory !== filterCategory) return;
-      
       const batches = state.stock.filter(s => s.material_id === mat.id && s.quantity > 0);
       batches.forEach(b => {
-        if (mat.name.toLowerCase().includes(searchTerm.toLowerCase()) || b.lot_number.toLowerCase().includes(searchTerm.toLowerCase())) {
-            result.push({ ...mat, ...b, unique_id: b.id });
-        }
+        if (mat.name.toLowerCase().includes(searchTerm.toLowerCase()) || b.lot_number.toLowerCase().includes(searchTerm.toLowerCase())) result.push({ ...mat, ...b, unique_id: b.id });
       });
     });
-    
     return result.sort((a, b) => {
         if (sortBy === 'exp_asc') return new Date(a.expiration_date) - new Date(b.expiration_date);
         if (sortBy === 'exp_desc') return new Date(b.expiration_date) - new Date(a.expiration_date);
@@ -664,105 +773,139 @@ const Inventory = ({ state }) => {
     });
   }, [state, searchTerm, filterCategory, sortBy]);
 
+  const handleWriteOff = async () => {
+      try {
+        const payload = { stock_batch_id: writeOffModal.batch.unique_id, qty: writeOffModal.qty, reason: writeOffModal.reason };
+        const { data, error } = await supabase.from('writeoffs').insert([payload]).select();
+        if(error) throw error;
+        
+        await supabase.from('stock_batches').update({ quantity: writeOffModal.batch.quantity - writeOffModal.qty }).eq('id', writeOffModal.batch.unique_id);
+        
+        dispatch({ type: 'ADD_WRITEOFF', payload: data[0] });
+        setWriteOffModal(null);
+      } catch(e) {
+        console.error(e);
+        alert("Помилка списання.");
+      }
+  };
+
+  const getBatchHistory = (batchId) => {
+      const arrived = state.stock.find(s=>s.id === batchId) || state.writeoffs.find(w=>w.stock_batch_id===batchId); 
+      const ops = state.expenses.filter(e => e.stock_batch_id === batchId).map(e => {
+         const op = state.operations.find(o => o.id === e.operation_id);
+         return { type: 'operation', date: op?.operation_date || e.created_at, op_num: op?.operation_num, qty: e.quantity };
+      });
+      const woffs = state.writeoffs.filter(w => w.stock_batch_id === batchId).map(w => ({ type: 'writeoff', date: w.created_at, reason: w.reason, qty: w.qty }));
+      return { arrived: arrived?.created_at, history: [...ops, ...woffs].sort((a,b) => new Date(b.date) - new Date(a.date)) };
+  };
+
+  const exportCSV = () => {
+    let csvContent = "Дата;№ Операції;ID Пацієнта;Тип;Матеріал;Код;LOT;Серійний;Розмір;Кількість\n";
+    state.operations.forEach(op => {
+      const opExpenses = state.expenses.filter(e => e.operation_id === op.id);
+      opExpenses.forEach(exp => {
+        const batch = state.stock.find(s => s.id === exp.stock_batch_id) || state.writeoffs.find(w=>w.stock_batch_id===exp.stock_batch_id) || {};
+        const mat = state.materials.find(m => m.id === batch.material_id) || {};
+        const row = [
+          op.operation_date, op.operation_num, op.patient_case_id, op.operation_type,
+          mat.name || 'Невідомо', mat.code || '', batch.lot_number || '', batch.serial_number || '', batch.size || '', exp.quantity
+        ].map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
+        csvContent += row + "\n";
+      });
+    });
+
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" }); 
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `cardio_expenses_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <h2 className="text-xl font-black text-white flex items-center gap-3">
-          <div className="p-2 bg-slate-800 rounded-xl text-slate-300"><Database size={24} /></div>
-          Залишки на складі
-        </h2>
-        <button onClick={exportCSV} className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all">
-          <Download size={18} className="text-teal-400" /> CSV Звіт витрат
-        </button>
-      </div>
+      
+      {writeOffModal && (
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl p-6">
+               <h3 className="text-lg font-bold text-rose-400 flex items-center gap-2 mb-4"><AlertTriangle/> Інше списання (Брак)</h3>
+               <p className="text-sm text-white font-bold mb-4">{writeOffModal.batch.name} <span className="text-xs text-slate-400 font-mono">LOT: {writeOffModal.batch.lot_number}</span></p>
+               <div className="space-y-4 mb-6">
+                  <div><label className="text-[10px] font-bold text-slate-400 uppercase">Кількість (Макс: {writeOffModal.batch.quantity})</label><input type="number" min="1" max={writeOffModal.batch.quantity} value={writeOffModal.qty} onChange={e=>setWriteOffModal({...writeOffModal, qty: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"/></div>
+                  <div><label className="text-[10px] font-bold text-slate-400 uppercase">Причина</label><select value={writeOffModal.reason} onChange={e=>setWriteOffModal({...writeOffModal, reason: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none appearance-none"><option>Прострочено</option><option>Порушення стерильності</option><option>Падіння/Брак</option></select></div>
+               </div>
+               <div className="flex gap-3"><button onClick={()=>setWriteOffModal(null)} className="flex-1 bg-slate-800 text-white font-bold py-3 rounded-xl">Скасувати</button><button onClick={handleWriteOff} className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 rounded-xl">Списати</button></div>
+            </div>
+         </div>
+      )}
+
+      {historyModal && (() => {
+         const hist = getBatchHistory(historyModal.unique_id);
+         return (
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+               <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2"><Clock className="text-teal-500"/> Історія партії</h3>
+                  <button onClick={()=>setHistoryModal(null)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full"><X size={18}/></button>
+               </div>
+               <div className="p-5 overflow-y-auto flex-1 space-y-6">
+                  <div>
+                    <p className="font-bold text-white">{historyModal.name}</p>
+                    <div className="flex gap-2 items-center mt-1">
+                      {historyModal.size && <span className="text-[10px] bg-teal-900/30 text-teal-400 px-1.5 rounded font-bold">Розмір: {historyModal.size}</span>}
+                      <p className="text-xs text-slate-400 font-mono">LOT: {historyModal.lot_number} | SN: {historyModal.serial_number||'-'}</p>
+                    </div>
+                  </div>
+                  <div className="relative border-l-2 border-slate-800 ml-3 space-y-6 pl-6">
+                      <div className="relative"><div className="absolute -left-[1.95rem] top-1 w-4 h-4 rounded-full bg-teal-500 border-4 border-slate-900"></div><p className="text-xs text-slate-400 mb-1">{new Date(hist.arrived).toLocaleString('uk-UA')}</p><p className="font-bold text-white text-sm">Оприбутковано на склад</p></div>
+                      {hist.history.map((h, i) => (
+                         <div key={i} className="relative"><div className={`absolute -left-[1.95rem] top-1 w-4 h-4 rounded-full border-4 border-slate-900 ${h.type==='operation' ? 'bg-slate-500' : 'bg-rose-500'}`}></div><p className="text-xs text-slate-400 mb-1">{new Date(h.date).toLocaleString('uk-UA')}</p><p className="font-bold text-white text-sm">{h.type === 'operation' ? `Списано на операцію №${h.op_num}` : `Списання: ${h.reason}`}</p><p className="text-xs font-black text-rose-400 mt-1">-{h.qty} шт</p></div>
+                      ))}
+                  </div>
+               </div>
+            </div>
+         </div>
+         );
+      })()}
 
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
-          <input 
-            type="text" 
-            placeholder="Пошук матеріалу за назвою або партією (LOT)..." 
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full h-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-12 pr-4 text-white focus:ring-2 focus:ring-teal-500 outline-none shadow-lg placeholder:text-slate-600 transition-all"
-          />
+          <input type="text" placeholder="Пошук матеріалу за назвою або партією (LOT)..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full h-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-12 pr-4 text-white focus:ring-2 focus:ring-teal-500 outline-none shadow-lg placeholder:text-slate-600" />
         </div>
-        
         <div className="flex gap-3 w-full md:w-auto">
-            <div className="relative flex-1 md:w-48">
-                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                <select 
-                    value={filterCategory} 
-                    onChange={e => setFilterCategory(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-10 pr-3 text-sm text-white focus:ring-2 focus:ring-teal-500 outline-none shadow-lg appearance-none cursor-pointer"
-                >
-                    <option value="All">Всі категорії</option>
-                    {subcategories.filter(c => c !== 'All').map(c => (
-                        <option key={c} value={c}>{c}</option>
-                    ))}
-                </select>
-            </div>
-            
-            <div className="relative flex-1 md:w-48">
-                <ArrowDownUp className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                <select 
-                    value={sortBy} 
-                    onChange={e => setSortBy(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-10 pr-3 text-sm text-white focus:ring-2 focus:ring-teal-500 outline-none shadow-lg appearance-none cursor-pointer"
-                >
-                    <option value="exp_asc">Термін (спочатку старі)</option>
-                    <option value="exp_desc">Термін (спочатку нові)</option>
-                    <option value="name_asc">За алфавітом (А-Я)</option>
-                    <option value="qty_desc">Кількість (спочатку більше)</option>
-                </select>
-            </div>
+            <div className="relative flex-1 md:w-48"><Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} /><select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-10 pr-3 text-sm text-white outline-none appearance-none cursor-pointer"><option value="All">Всі категорії</option>{subcategories.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+            <div className="relative flex-1 md:w-48"><ArrowDownUp className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} /><select value={sortBy} onChange={e => setSortBy(e.target.value)} className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3.5 pl-10 pr-3 text-sm text-white outline-none appearance-none cursor-pointer"><option value="exp_asc">Термін (старі)</option><option value="exp_desc">Термін (нові)</option><option value="name_asc">За алфавітом</option><option value="qty_desc">За кількістю</option></select></div>
+            <button onClick={exportCSV} className="bg-slate-800 hover:bg-slate-700 text-teal-400 border border-slate-700 rounded-2xl px-4 flex items-center justify-center transition-colors" title="Експорт витрат у CSV"><Download size={20}/></button>
         </div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-950">
-              <tr>
-                <th className="px-5 py-4">Номенклатура</th>
-                <th className="px-5 py-4">Партія (LOT / SN)</th>
-                <th className="px-5 py-4">Термін</th>
-                <th className="px-5 py-4 text-right">Залишок</th>
-              </tr>
-            </thead>
+          <table className="w-full text-sm text-left"><thead className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-950"><tr><th className="px-5 py-4">Номенклатура</th><th className="px-5 py-4">Партія (LOT / SN)</th><th className="px-5 py-4">Термін</th><th className="px-5 py-4 text-right">Залишок</th></tr></thead>
             <tbody className="divide-y divide-slate-800/50 text-slate-300">
               {inventoryView.map(item => {
                 const isExpiring = new Date(item.expiration_date) <= new Date(new Date().setDate(new Date().getDate() + 30));
                 return (
-                  <tr key={item.unique_id} className="hover:bg-slate-800/30 transition-colors group">
-                    <td className="px-5 py-4">
-                      <div className="font-bold text-white text-sm">{item.name}</div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-1 tracking-wider">{item.gtin}</div>
-                    </td>
+                  <tr key={item.unique_id} onClick={()=>setHistoryModal(item)} className="hover:bg-slate-800/30 transition-colors cursor-pointer group">
+                    <td className="px-5 py-4"><div className="font-bold text-white text-sm">{item.name}</div><div className="text-[10px] text-slate-500 font-mono mt-1">{item.code}</div></td>
                     <td className="px-5 py-4 font-mono text-xs">
-                      <div className="text-teal-400 font-bold bg-teal-500/10 inline-block px-2 py-0.5 rounded border border-teal-500/20">{item.lot_number}</div>
-                      {item.serial_number && <div className="text-slate-400 mt-1.5">SN: {item.serial_number}</div>}
+                       <div className="text-teal-400 font-bold bg-teal-500/10 inline-block px-2 py-0.5 rounded border border-teal-500/20">{item.lot_number}</div>
+                       {item.size && <div className="text-[13px] font-bold text-white mt-1 bg-slate-800 px-2 py-0.5 rounded-md inline-block border border-slate-700 shadow-sm">Розмір: <span className="text-teal-400">{item.size}</span></div>}
+                       {item.serial_number && <div className="text-slate-400 mt-1.5">SN: {item.serial_number}</div>}
                     </td>
-                    <td className="px-5 py-4">
-                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold inline-flex items-center gap-1 ${isExpiring ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'text-slate-400'}`}>
-                        {isExpiring && <AlertTriangle size={12} />}
-                        {new Date(item.expiration_date).toLocaleDateString('uk-UA')}
-                      </span>
-                    </td>
+                    <td className="px-5 py-4"><span className={`px-2.5 py-1 rounded-md text-xs font-bold inline-flex items-center gap-1 ${isExpiring ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'text-slate-400'}`}>{isExpiring && <AlertTriangle size={12} />}{new Date(item.expiration_date).toLocaleDateString('uk-UA')}</span></td>
                     <td className="px-5 py-4 text-right">
-                      <div className="font-black text-xl text-white">{item.quantity} <span className="text-xs text-slate-500 font-medium">{item.unit}</span></div>
+                       <div className="flex items-center justify-end gap-3">
+                          <div className="font-black text-xl text-white">{item.quantity} <span className="text-xs text-slate-500 font-medium">шт</span></div>
+                          {!isReadOnly && <button onClick={(e) => { e.stopPropagation(); setWriteOffModal({batch: item, qty: 1, reason: 'Прострочено'}); }} className="p-2 bg-rose-950 text-rose-400 hover:text-white hover:bg-rose-900 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"><AlertTriangle size={16}/></button>}
+                       </div>
                     </td>
                   </tr>
                 )
               })}
-              {inventoryView.length === 0 && (
-                <tr>
-                  <td colSpan="4" className="px-5 py-16 text-center">
-                     <Database size={48} className="mx-auto text-slate-700 mb-3" />
-                     <p className="text-slate-500 font-medium">Склад порожній або нічого не знайдено</p>
-                  </td>
-                </tr>
-              )}
+              {inventoryView.length === 0 && <tr><td colSpan="4" className="px-5 py-16 text-center"><Database size={48} className="mx-auto text-slate-700 mb-3" /><p className="text-slate-500 font-medium">Склад порожній або нічого не знайдено</p></td></tr>}
             </tbody>
           </table>
         </div>
@@ -771,133 +914,309 @@ const Inventory = ({ state }) => {
   );
 };
 
-// Reducer для керування станом (тільки локальний стейт без localStorage)
-const reducer = (state, action) => {
-  switch (action.type) {
-    case 'INIT': 
-      return action.payload;
-    case 'ADD_STOCK':
-      return { ...state, stock: [...state.stock, action.payload] };
-    case 'ADD_OPERATION':
-      const { operation, expenses } = action.payload;
-      const updatedStock = state.stock.map(batch => {
-         const used = expenses.find(e => e.stock_batch_id === batch.id);
-         if (used) return { ...batch, quantity: batch.quantity - used.quantity };
-         return batch;
-      });
-      return { ...state, operations: [...state.operations, operation], expenses: [...state.expenses, ...expenses], stock: updatedStock };
-    default: return state;
+const UsersManager = ({ state, dispatch }) => {
+  const [formData, setFormData] = useState({ id: '', name: '', pin: '', role: 'user', permissions: ['inventory'] });
+  const [isEditing, setIsEditing] = useState(false);
+
+  const availablePermissions = [
+    { id: 'dashboard', label: 'Дашборд (Аналітика)' },
+    { id: 'postop', label: 'Списання на операцію' },
+    { id: 'stockin', label: 'Прихід товару' },
+    { id: 'catalog', label: 'Редагування довідника' }
+  ];
+
+  const handleTogglePermission = (permId) => {
+    if (formData.permissions.includes(permId)) {
+      setFormData({ ...formData, permissions: formData.permissions.filter(p => p !== permId) });
+    } else {
+      setFormData({ ...formData, permissions: [...formData.permissions, permId] });
+    }
+  };
+
+  const handleSave = async () => {
+    if (!formData.name || formData.pin.length < 4) { alert("Введіть ім'я та ПІН-код (мінімум 4 цифри)"); return; }
+    if (state.users.some(u => u.pin === formData.pin && u.id !== formData.id)) { alert("Цей ПІН-код вже використовується!"); return; }
+
+    try {
+      if (isEditing) { 
+        await supabase.from('users').update(formData).eq('id', formData.id);
+        dispatch({ type: 'UPDATE_USER', payload: formData }); 
+      } 
+      else { 
+        const { data, error } = await supabase.from('users').insert([{name: formData.name, pin: formData.pin, role: formData.role, permissions: formData.permissions}]).select();
+        if(error) throw error;
+        dispatch({ type: 'ADD_USER', payload: data[0] }); 
+      }
+      setFormData({ id: '', name: '', pin: '', role: 'user', permissions: ['inventory'] });
+      setIsEditing(false);
+    } catch(e) { console.error(e); alert("Помилка збереження."); }
+  };
+
+  const handleDeleteUser = async (id) => {
+     try {
+       await supabase.from('users').delete().eq('id', id);
+       dispatch({type: 'DELETE_USER', payload: id});
+     } catch(e) { console.error(e); }
   }
+
+  return (
+    <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl h-fit">
+          <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2"><Shield className="text-teal-500"/> {isEditing ? 'Редагування доступу' : 'Новий працівник'}</h3>
+          <div className="space-y-4">
+            <div>
+               <label className="text-[10px] font-bold text-slate-400 uppercase pl-1">Ім'я / Посада *</label>
+               <input type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none" placeholder="Медсестра Анна" />
+            </div>
+            <div>
+               <label className="text-[10px] font-bold text-slate-400 uppercase pl-1">PIN-код (тільки цифри) *</label>
+               <input type="text" maxLength="6" value={formData.pin} onChange={e => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-teal-400 font-mono text-lg tracking-widest text-center outline-none" placeholder="****" />
+            </div>
+            
+            {formData.role !== 'admin' && (
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-3">Права доступу (вкладки)</p>
+                <div className="space-y-2">
+                  {availablePermissions.map(perm => (
+                    <label key={perm.id} className="flex items-center gap-3 cursor-pointer">
+                      <input type="checkbox" checked={formData.permissions.includes(perm.id)} onChange={() => handleTogglePermission(perm.id)} className="w-4 h-4 accent-teal-500" />
+                      <span className="text-sm text-slate-300 font-medium">{perm.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <button onClick={handleSave} className="w-full mt-6 bg-teal-600 hover:bg-teal-500 text-white font-bold py-3.5 rounded-xl transition-colors">{isEditing ? 'Оновити' : 'Створити ПІН'}</button>
+          {isEditing && <button onClick={() => {setIsEditing(false); setFormData({id:'',name:'',pin:'',role:'user',permissions:['inventory']})}} className="w-full mt-3 bg-slate-800 text-slate-300 font-bold py-3.5 rounded-xl">Скасувати</button>}
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl lg:col-span-2">
+          <table className="w-full text-sm text-left">
+            <thead className="text-[10px] font-bold text-slate-400 uppercase bg-slate-950">
+              <tr><th className="px-5 py-4">Користувач</th><th className="px-5 py-4">ПІН</th><th className="px-5 py-4">Доступ</th><th className="px-5 py-4 text-right">Дії</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/50 text-slate-300">
+              {state.users?.map(u => (
+                <tr key={u.id} className="hover:bg-slate-800/30">
+                  <td className="px-5 py-4">
+                    <div className="font-bold text-white text-sm">{u.name}</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{u.role === 'admin' ? 'Адміністратор' : 'Персонал'}</div>
+                  </td>
+                  <td className="px-5 py-4"><span className="font-mono text-teal-400 bg-teal-500/10 px-2 py-1 rounded border border-teal-500/20">{u.pin}</span></td>
+                  <td className="px-5 py-4">
+                    {u.role === 'admin' ? <span className="text-xs text-rose-400 font-bold">Повний доступ</span> : 
+                    <div className="flex flex-wrap gap-1">
+                      {u.permissions.map(p => <span key={p} className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-300">{availablePermissions.find(a=>a.id===p)?.label || p}</span>)}
+                    </div>}
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <button onClick={() => {setFormData({...u}); setIsEditing(true);}} className="p-2 text-slate-400 hover:text-teal-400 bg-slate-950 rounded-lg mr-2"><Edit2 size={16}/></button>
+                    {u.role !== 'admin' && <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-slate-400 hover:text-rose-400 bg-slate-950 rounded-lg"><Trash2 size={16}/></button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 };
 
-// Головний компонент додатку
+/* STREAMING_CHUNK: Reducer and App Core */
+const reducer = (state, action) => {
+  let newState = { ...state };
+  switch (action.type) {
+    case 'INIT': newState = action.payload; break;
+    case 'ADD_STOCK': newState.stock = [...state.stock, action.payload]; break;
+    case 'ADD_MATERIAL': newState.materials = [...state.materials, action.payload]; break;
+    case 'UPDATE_MATERIAL': newState.materials = state.materials.map(m => m.id === action.payload.id ? action.payload : m); break;
+    case 'DELETE_MATERIAL': newState.materials = state.materials.filter(m => m.id !== action.payload); break;
+    case 'ADD_SUBCATEGORY': newState.subcategories = [...(state.subcategories||[]), action.payload]; break;
+    case 'DELETE_SUBCATEGORY': newState.subcategories = state.subcategories.filter(s => s.id !== action.payload); break;
+    case 'ADD_USER': newState.users = [...state.users, action.payload]; break;
+    case 'UPDATE_USER': newState.users = state.users.map(u => u.id === action.payload.id ? action.payload : u); break;
+    case 'DELETE_USER': newState.users = state.users.filter(u => u.id !== action.payload); break;
+    case 'ADD_WRITEOFF': 
+        newState.writeoffs = [...state.writeoffs, action.payload];
+        newState.stock = state.stock.map(b => b.id === action.payload.stock_batch_id ? {...b, quantity: b.quantity - action.payload.qty} : b);
+        break;
+    case 'ADD_OPERATION':
+      const { operation, expenses } = action.payload;
+      newState.operations = [...state.operations, operation];
+      newState.expenses = [...state.expenses, ...expenses];
+      newState.stock = state.stock.map(batch => {
+         const used = expenses.find(e => e.stock_batch_id === batch.id);
+         return used ? { ...batch, quantity: batch.quantity - used.quantity } : batch;
+      });
+      break;
+    case 'DELETE_OPERATION':
+      const opId = action.payload;
+      const expsToRestore = state.expenses.filter(e => e.operation_id === opId);
+      newState.operations = state.operations.filter(o => o.id !== opId);
+      newState.expenses = state.expenses.filter(e => e.operation_id !== opId);
+      newState.stock = state.stock.map(batch => {
+         const rest = expsToRestore.find(e => e.stock_batch_id === batch.id);
+         return rest ? { ...batch, quantity: batch.quantity + rest.quantity } : batch;
+      });
+      break;
+  }
+  return newState;
+};
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [state, dispatch] = React.useReducer(reducer, { materials: [], stock: [], operations: [], expenses: [] });
+  const [activeTab, setActiveTab] = useState('inventory');
+  const [isLocked, setIsLocked] = useState(true);
+  const [showAuth, setShowAuth] = useState(false);
+  const [pin, setPin] = useState('');
+  const [currentUser, setCurrentUser] = useState(null);
+  
+  const [state, dispatch] = React.useReducer(reducer, { materials: [], stock: [], operations: [], expenses: [], subcategories: [], writeoffs: [], users: [] });
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    async function fetchCloudData() {
-      try {
-        const [matRes, stockRes, opRes, expRes] = await Promise.all([
-          supabase.from('materials').select('*'),
-          supabase.from('stock_batches').select('*'),
-          supabase.from('operations').select('*'),
-          supabase.from('expenses').select('*')
-        ]);
+    async function loadCloudData() {
+       try {
+          const [matRes, stockRes, opRes, expRes, subRes, writeRes, usersRes] = await Promise.all([
+             supabase.from('materials').select('*'),
+             supabase.from('stock_batches').select('*'),
+             supabase.from('operations').select('*'),
+             supabase.from('expenses').select('*'),
+             supabase.from('subcategories').select('*'),
+             supabase.from('writeoffs').select('*'),
+             supabase.from('users').select('*')
+          ]);
 
-        dispatch({
-          type: 'INIT',
-          payload: {
-            materials: matRes.data || [],
-            stock: stockRes.data || [],
-            operations: opRes.data || [],
-            expenses: expRes.data || []
+          let usersList = usersRes.data || [];
+          if(usersList.length === 0) {
+             // Create default admin if DB is completely empty
+             const defaultAdmin = { name: 'Головний Адміністратор', pin: '2105', role: 'admin', permissions: ['all'] };
+             const { data } = await supabase.from('users').insert([defaultAdmin]).select();
+             if(data) usersList = [data[0]];
           }
-        });
-      } catch (error) {
-        console.error("Помилка завантаження бази даних:", error);
-      } finally {
-        setIsLoaded(true);
-      }
+
+          dispatch({ type: 'INIT', payload: { 
+            materials: matRes.data || [], 
+            stock: stockRes.data || [], 
+            operations: opRes.data || [], 
+            expenses: expRes.data || [], 
+            subcategories: subRes.data || [], 
+            writeoffs: writeRes.data || [], 
+            users: usersList
+          } });
+       } catch (e) {
+          console.error("Cloud DB load error:", e);
+       } finally {
+          setIsLoaded(true);
+       }
     }
-    
-    fetchCloudData();
+    loadCloudData();
   }, []);
 
-  if (!isLoaded) return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-4 text-teal-500">
-      <HeartPulse size={48} className="animate-pulse" />
-      <span className="font-bold tracking-widest uppercase text-sm">З'єднання з хмарою...</span>
-    </div>
-  );
+  const handlePin = (val) => {
+     const newPin = pin + val;
+     setPin(newPin);
+     
+     const foundUser = state.users.find(u => u.pin === newPin);
+     
+     if (foundUser) { 
+       setCurrentUser(foundUser);
+       setIsLocked(false); 
+       setShowAuth(false); 
+       setPin(''); 
+       if (foundUser.role === 'admin') setActiveTab('dashboard');
+       else setActiveTab(foundUser.permissions.includes('postop') ? 'postop' : 'inventory');
+     } 
+     else if (newPin.length >= 4) { 
+       setTimeout(() => setPin(''), 300); 
+     }
+  };
 
-  const NavItem = ({ id, icon: Icon, label }) => (
-    <button 
-      onClick={() => setActiveTab(id)}
-      className={`flex flex-col items-center justify-center w-full py-3 gap-1.5 transition-all ${activeTab === id ? 'text-teal-400 scale-110' : 'text-slate-500 hover:text-slate-300'}`}
-    >
-      <Icon size={22} className={activeTab === id ? 'drop-shadow-[0_0_10px_rgba(45,212,191,0.6)]' : ''} />
-      <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
-    </button>
-  );
+  const hasAccess = (tabId) => {
+     if (!currentUser) return false;
+     if (currentUser.role === 'admin') return true;
+     if (tabId === 'inventory') return true; 
+     return currentUser.permissions.includes(tabId);
+  };
+
+  if (!isLoaded) return <div className="min-h-screen bg-[#020817] flex items-center justify-center"><HeartPulse size={48} className="animate-pulse text-teal-500" /></div>;
 
   return (
-    <div className="min-h-screen bg-[#020817] text-slate-200 pb-24 md:pb-0 font-sans selection:bg-teal-500/30">
+    <div className="min-h-screen bg-[#020817] text-slate-200 pb-24 md:pb-0 font-sans">
+      
+      {showAuth && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex justify-center items-center p-4">
+           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl flex flex-col items-center animate-in zoom-in-95 duration-200">
+              <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center mb-6 border border-slate-700 shadow-inner"><Lock size={32} className="text-teal-500"/></div>
+              <h2 className="text-xl font-bold text-white mb-6">Введіть PIN-код</h2>
+              <div className="flex gap-4 mb-8">
+                {[0,1,2,3].map(i => <div key={i} className={`w-4 h-4 rounded-full transition-all ${pin.length > i ? 'bg-teal-500 scale-110 shadow-[0_0_10px_rgba(20,184,166,0.5)]' : 'bg-slate-800'}`}></div>)}
+              </div>
+              <div className="grid grid-cols-3 gap-4 w-full mb-6">
+                 {[1,2,3,4,5,6,7,8,9].map(num => <button key={num} onClick={()=>handlePin(num.toString())} className="h-16 bg-slate-800 hover:bg-slate-700 rounded-2xl text-2xl font-bold text-white transition-colors shadow-sm">{num}</button>)}
+                 <div className="col-start-2"><button onClick={()=>handlePin('0')} className="h-16 w-full bg-slate-800 hover:bg-slate-700 rounded-2xl text-2xl font-bold text-white transition-colors shadow-sm">0</button></div>
+              </div>
+              <button onClick={()=>{setShowAuth(false); setPin('');}} className="text-slate-500 hover:text-white text-sm font-bold">Скасувати</button>
+           </div>
+        </div>
+      )}
+
       <header className="bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/50 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 md:px-8 h-16 md:h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
-             <div className="bg-gradient-to-br from-teal-400 to-emerald-600 text-slate-950 p-2 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-               <HeartPulse size={24} strokeWidth={2.5} />
-             </div>
-             <div>
-                <h1 className="text-xl font-black tracking-tight text-white leading-none">Cardio<span className="text-teal-400">Stock</span></h1>
-                <span className="text-[10px] text-slate-500 font-bold tracking-widest uppercase">Хірургічний облік</span>
-             </div>
+             <div className="bg-gradient-to-br from-teal-400 to-emerald-600 text-slate-950 p-2 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)]"><HeartPulse size={24} strokeWidth={2.5} /></div>
+             <div><h1 className="text-xl font-black tracking-tight text-white leading-none">Cardio<span className="text-teal-400">Stock</span></h1><span className="text-[10px] text-slate-500 font-bold tracking-widest uppercase">Хірургічний облік</span></div>
           </div>
-          <div className="hidden md:flex items-center gap-1 bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800">
-             {[
-               {id: 'dashboard', label: 'Дашборд'},
-               {id: 'postop', label: 'Списання'},
-               {id: 'stockin', label: 'Прихід'},
-               {id: 'inventory', label: 'Склад'}
-             ].map(t => (
-               <button 
-                 key={t.id}
-                 onClick={() => setActiveTab(t.id)} 
-                 className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === t.id ? 'bg-slate-800 text-teal-400 shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
-               >
-                 {t.label}
-               </button>
-             ))}
+          <div className="flex items-center gap-4">
+             {!isLocked && (
+               <div className="hidden md:flex items-center gap-1 bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800">
+                  {[{id: 'dashboard', label: 'Дашборд'},{id: 'postop', label: 'Списання'},{id: 'stockin', label: 'Прихід'},{id: 'inventory', label: 'Склад'},{id: 'catalog', label: 'Довідник'}].map(t => (
+                    hasAccess(t.id) && (
+                      <button key={t.id} onClick={() => setActiveTab(t.id)} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === t.id ? 'bg-slate-800 text-teal-400 shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}>{t.label}</button>
+                    )
+                  ))}
+                  {currentUser?.role === 'admin' && (
+                     <button onClick={() => setActiveTab('users')} className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'users' ? 'bg-teal-900/30 text-teal-400 border border-teal-500/30 shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}><Users size={16}/></button>
+                  )}
+               </div>
+             )}
+             <button onClick={()=>{
+                 if(!isLocked) { setIsLocked(true); setCurrentUser(null); setActiveTab('inventory'); }
+                 else { setShowAuth(true); }
+             }} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-colors border ${isLocked ? 'bg-teal-500/10 text-teal-400 border-teal-500/20 hover:bg-teal-500/20' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}>
+                {isLocked ? <><Lock size={16}/> Увійти</> : <><Unlock size={16}/> {currentUser?.name.split(' ')[0]}</>}
+             </button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
-        {activeTab === 'dashboard' && <Dashboard state={state} />}
-        {activeTab === 'postop' && <PostOpExpense state={state} dispatch={dispatch} />}
-        {activeTab === 'stockin' && <StockIn state={state} dispatch={dispatch} />}
-        {activeTab === 'inventory' && <Inventory state={state} />}
+        {isLocked && activeTab !== 'inventory' && setActiveTab('inventory')}
+        {activeTab === 'dashboard' && hasAccess('dashboard') && <Dashboard state={state} dispatch={dispatch} />}
+        {activeTab === 'postop' && hasAccess('postop') && <PostOpExpense state={state} dispatch={dispatch} />}
+        {activeTab === 'stockin' && hasAccess('stockin') && <StockIn state={state} dispatch={dispatch} />}
+        {activeTab === 'catalog' && hasAccess('catalog') && <Catalog state={state} dispatch={dispatch} />}
+        {activeTab === 'inventory' && <Inventory state={state} dispatch={dispatch} isReadOnly={isLocked} />}
+        {activeTab === 'users' && currentUser?.role === 'admin' && <UsersManager state={state} dispatch={dispatch} />}
       </main>
 
-      <nav className="md:hidden fixed bottom-0 w-full bg-slate-950/90 backdrop-blur-lg border-t border-slate-800 pb-safe z-40">
-        <div className="flex justify-around items-center h-20 px-2">
-          <NavItem id="dashboard" icon={Activity} label="Дашборд" />
-          <NavItem id="stockin" icon={PackagePlus} label="Прихід" />
-          
-          <div className="relative -top-6">
-            <button 
-              onClick={() => setActiveTab('postop')}
-              className={`h-16 w-16 rounded-full flex items-center justify-center shadow-[0_10px_30px_rgba(13,148,136,0.4)] transition-transform active:scale-90 border-4 border-[#020817] ${activeTab === 'postop' ? 'bg-teal-400 text-slate-950' : 'bg-slate-800 text-teal-400'}`}
-            >
-              <HeartPulse size={28} strokeWidth={2.5} />
-            </button>
+      {!isLocked && (
+        <nav className="md:hidden fixed bottom-0 w-full bg-slate-950/90 backdrop-blur-lg border-t border-slate-800 pb-safe z-40">
+          <div className="flex justify-around items-center h-20 px-2">
+            {hasAccess('dashboard') && <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1.5 ${activeTab==='dashboard'?'text-teal-400':'text-slate-500'}`}><Activity size={22}/></button>}
+            {hasAccess('stockin') && <button onClick={() => setActiveTab('stockin')} className={`flex flex-col items-center gap-1.5 ${activeTab==='stockin'?'text-teal-400':'text-slate-500'}`}><PackagePlus size={22}/></button>}
+            
+            {hasAccess('postop') && (
+               <div className="relative -top-6"><button onClick={() => setActiveTab('postop')} className={`h-16 w-16 rounded-full flex items-center justify-center shadow-lg border-4 border-[#020817] ${activeTab==='postop'?'bg-teal-400 text-slate-950':'bg-slate-800 text-teal-400'}`}><HeartPulse size={28} strokeWidth={2.5}/></button></div>
+            )}
+            
+            <button onClick={() => setActiveTab('inventory')} className={`flex flex-col items-center gap-1.5 ${activeTab==='inventory'?'text-teal-400':'text-slate-500'}`}><Database size={22}/></button>
+            {hasAccess('catalog') && <button onClick={() => setActiveTab('catalog')} className={`flex flex-col items-center gap-1.5 ${activeTab==='catalog'?'text-teal-400':'text-slate-500'}`}><Edit2 size={22}/></button>}
           </div>
-          
-          <NavItem id="inventory" icon={Database} label="Склад" />
-        </div>
-      </nav>
+        </nav>
+      )}
     </div>
   );
 }
