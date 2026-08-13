@@ -9,7 +9,7 @@
 // тіло однаково парситься як JSON через JSON.parse(e.postData.contents),
 // незалежно від заявленого Content-Type.
 
-const APPS_SCRIPT_URL = 'ВСТАВТЕ_СЮДИ_URL_ВЛАСНОГО_ДЕПЛОЮ_ЩО_ЗАКІНЧУЄТЬСЯ_НА_/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzgvDMVSdhULfVeBbHcgsCgweMhYNpN0UDX4vSdXotIME7DEGdHn3wwn2h4Y6vbsUydIg/exec';
 
 /**
  * Завантажує весь стан застосунку (materials, stock, operations, expenses,
