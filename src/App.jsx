@@ -1,23 +1,35 @@
-/* STREAMING_CHUNK: Setup, Icons, Charts and DB Init */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { 
-  HeartPulse, ScanBarcode, PackagePlus, Activity, AlertTriangle, Database, Download, CheckCircle, 
-  X, Search, Plus, Trash2, Camera, Calendar, Filter, ArrowDownUp, Lock, Unlock, Edit2, Clock, 
-  PieChart as PieChartIcon, BarChart3, Settings, Users, Shield
+import {
+  HeartPulse, ScanBarcode, PackagePlus, Activity, AlertTriangle, Database, Download, CheckCircle,
+  X, Search, Trash2, Camera, Calendar, Filter, ArrowDownUp, Lock, Unlock, Edit2, Clock,
+  PieChart as PieChartIcon, BarChart3, Users, Shield
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { createClient } from '@supabase/supabase-js';
+import { fetchAllData, callAction } from './appsScriptClient';
 
-// Ініціалізація Supabase клієнта
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const DEFAULT_SUBCATEGORIES = [
+  { id: 'sc1', name: 'Клапани АК' },
+  { id: 'sc2', name: 'Клапани МК' },
+  { id: 'sc3', name: 'Кільця МК' },
+  { id: 'sc4', name: 'Кільця ТК' },
+  { id: 'sc5', name: 'Протези аорти' },
+  { id: 'sc6', name: 'Оксигенатори' }
+];
 
-/* STREAMING_CHUNK: GS1 Parser and Scanner */
+// Генерація ID на клієнті — використовується лише для тимчасових локальних елементів
+// (наприклад "кошика" матеріалів у формі списання до моменту відправки на сервер).
+// Персистентні ID для записів у таблицях тепер генерує Apps Script на сервері.
+const genId = (prefix) => {
+  const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}_${uuid}`;
+};
+
 const parseBarcode = (code) => {
   let cleanCode = code.replace(/\\u001d|\\x1d|<GS>|\]d2/gi, String.fromCharCode(29));
   if (cleanCode.startsWith(']d2')) cleanCode = cleanCode.substring(3);
-  
+
   let result = { code: '', lot: '', exp: '', serial: '', raw: code };
   let remaining = cleanCode;
 
@@ -41,16 +53,16 @@ const parseBarcode = (code) => {
         else { result.serial = remaining.substring(2, nextGS); remaining = remaining.substring(nextGS + 1); }
       } else {
         let nextGS = remaining.indexOf(String.fromCharCode(29));
-        if (nextGS === -1) break; 
+        if (nextGS === -1) break;
         remaining = remaining.substring(nextGS + 1);
       }
     }
   } catch (e) { console.error("Parse Error:", e); }
-  
+
   if (!result.code) {
-      const basicGtinMatch = cleanCode.match(/(?:01)(\d{14})/);
-      if (basicGtinMatch) result.code = basicGtinMatch[1];
-      else result.code = cleanCode; 
+    const basicGtinMatch = cleanCode.match(/(?:01)(\d{14})/);
+    if (basicGtinMatch) result.code = basicGtinMatch[1];
+    else result.code = cleanCode;
   }
   return result;
 };
@@ -77,6 +89,7 @@ const BarcodeScanner = ({ onScan, onClose }) => {
       script.src = 'https://unpkg.com/html5-qrcode';
       script.async = true;
       script.onload = initScanner;
+      script.onerror = () => setError("Не вдалося завантажити модуль сканера. Перевірте інтернет-з'єднання.");
       document.body.appendChild(script);
     } else { initScanner(); }
 
@@ -110,12 +123,12 @@ const BarcodeScanner = ({ onScan, onClose }) => {
   );
 };
 
-/* STREAMING_CHUNK: Dashboard Component */
-const Dashboard = ({ state, dispatch }) => {
+const Dashboard = ({ state, dispatch, currentUser }) => {
   const [selectedOp, setSelectedOp] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const totalItems = state.stock.reduce((sum, item) => sum + item.quantity, 0);
-  
+
   const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
   const operationsLast30Days = state.operations.filter(op => new Date(op.operation_date) >= thirtyDaysAgo).length;
 
@@ -129,48 +142,39 @@ const Dashboard = ({ state, dispatch }) => {
   const pieData = useMemo(() => {
     const categories = {};
     state.stock.forEach(batch => {
-       if(batch.quantity <= 0) return;
+       if (batch.quantity <= 0) return;
        const mat = state.materials.find(m => m.id === batch.material_id);
-       if(!mat) return;
+       if (!mat) return;
        categories[mat.subcategory] = (categories[mat.subcategory] || 0) + batch.quantity;
     });
     return Object.entries(categories).map(([name, value]) => ({ name, value })).filter(d => d.value > 0).sort((a,b)=>b.value - a.value);
   }, [state.stock, state.materials]);
-  
+
   const COLORS = ['#0d9488', '#3b82f6', '#8b5cf6', '#f59e0b', '#ec4899', '#64748b'];
 
   const barData = useMemo(() => {
     const months = {};
     state.operations.forEach(op => {
-      const month = op.operation_date.substring(0, 7); 
+      const month = op.operation_date.substring(0, 7);
       months[month] = (months[month] || 0) + 1;
     });
     return Object.entries(months).map(([name, value]) => ({ name, value })).sort((a,b) => a.name.localeCompare(b.name)).slice(-6);
   }, [state.operations]);
 
   const handleDeleteOp = async () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
     try {
-       const opId = selectedOp.id;
-       const expsToRestore = state.expenses.filter(e => e.operation_id === opId);
-       
-       // В Supabase налаштовано ON DELETE CASCADE, тому при видаленні операції,
-       // автоматично видаляться пов'язані витрати (expenses).
-       const { error } = await supabase.from('operations').delete().eq('id', opId);
-       if(error) throw error;
+      const result = await callAction('deleteOperation', { operationId: selectedOp.id }, currentUser?.pin);
+      if (!result.success) { alert(result.error || "Помилка видалення операції."); return; }
 
-       // Повертаємо залишки на склад
-       for (const exp of expsToRestore) {
-          const batch = state.stock.find(s => s.id === exp.stock_batch_id);
-          if (batch) {
-             await supabase.from('stock_batches').update({ quantity: batch.quantity + exp.quantity }).eq('id', batch.id);
-          }
-       }
-
-       dispatch({ type: 'DELETE_OPERATION', payload: opId });
-       setSelectedOp(null);
-    } catch(e) {
-       console.error("Помилка видалення операції:", e);
-       alert("Помилка при видаленні операції.");
+      dispatch({ type: 'DELETE_OPERATION', payload: selectedOp.id });
+      setSelectedOp(null);
+    } catch (e) {
+      console.error(e);
+      alert("Помилка видалення операції: немає з'єднання з сервером.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -266,7 +270,7 @@ const Dashboard = ({ state, dispatch }) => {
                    <p className="text-slate-500 text-xs uppercase tracking-widest mb-3 font-bold">Списані матеріали</p>
                    <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
                       {state.expenses.filter(e => e.operation_id === selectedOp.id).map(exp => {
-                         const batch = state.stock.find(s => s.id === exp.stock_batch_id) || state.writeoffs.find(w=>w.stock_batch_id === exp.stock_batch_id); 
+                         const batch = state.stock.find(s => s.id === exp.stock_batch_id) || state.writeoffs.find(w=>w.id === exp.stock_batch_id);
                          const mat = state.materials.find(m => m.id === batch?.material_id);
                          return (
                            <div key={exp.id} className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
@@ -285,7 +289,7 @@ const Dashboard = ({ state, dispatch }) => {
                 </div>
              </div>
              <div className="p-5 border-t border-slate-800 bg-slate-950/50 flex gap-3">
-                <button onClick={handleDeleteOp} className="flex-1 bg-rose-950 text-rose-400 hover:bg-rose-900 hover:text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2 transition-colors border border-rose-900/50"><Trash2 size={18}/> Скасувати та видалити</button>
+                <button onClick={handleDeleteOp} disabled={isDeleting} className="flex-1 bg-rose-950 text-rose-400 hover:bg-rose-900 hover:text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2 transition-colors border border-rose-900/50 disabled:opacity-50 disabled:cursor-not-allowed"><Trash2 size={18}/> {isDeleting ? 'Видалення...' : 'Скасувати та видалити'}</button>
              </div>
           </div>
         </div>
@@ -294,7 +298,6 @@ const Dashboard = ({ state, dispatch }) => {
   );
 };
 
-/* STREAMING_CHUNK: Components PostOp, StockIn, Catalog, Inventory, Users */
 const SearchableDropdown = ({ state, onSelect }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -327,7 +330,7 @@ const SearchableDropdown = ({ state, onSelect }) => {
     <div ref={wrapperRef} className="relative w-full">
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-        <input 
+        <input
           type="text" value={searchTerm} onChange={(e) => {setSearchTerm(e.target.value); setIsOpen(true);}}
           onFocus={() => setIsOpen(true)}
           placeholder="Пошук зі складу (Назва, LOT, Розмір)..."
@@ -351,11 +354,12 @@ const SearchableDropdown = ({ state, onSelect }) => {
   );
 };
 
-const PostOpExpense = ({ state, dispatch }) => {
+const PostOpExpense = ({ state, dispatch, currentUser }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [formData, setFormData] = useState({operation_num:"", patient_case_id:"", operation_type:"CABG On-pump", date:""});
   const [expenses, setExpenses] = useState([]);
   const [scanMessage, setScanMessage] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const showMsg = (type, text) => { setScanMessage({type, text}); setTimeout(() => setScanMessage(null), 4000); };
 
@@ -368,7 +372,7 @@ const PostOpExpense = ({ state, dispatch }) => {
         return prev.map(e => e.stock_batch_id === batch.id ? { ...e, quantity: e.quantity + 1 } : e);
       } else {
         showMsg('success', `Успішно додано: ${material.name}`);
-        return [...prev, { id: 'exp_' + Date.now(), stock_batch_id: batch.id, material_id: material.id, name: material.name, lot: batch.lot_number, serial: batch.serial_number, size: batch.size, quantity: 1, max: batch.quantity }];
+        return [...prev, { id: genId('exp'), stock_batch_id: batch.id, material_id: material.id, name: material.name, lot: batch.lot_number, serial: batch.serial_number, size: batch.size, quantity: 1, max: batch.quantity }];
       }
     });
   };
@@ -395,44 +399,31 @@ const PostOpExpense = ({ state, dispatch }) => {
 
   const submitOperation = async () => {
     if (!formData.operation_num || !formData.patient_case_id) { showMsg('error', "Заповніть номер операції та ІБ"); return; }
-    
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
     try {
-       // Збереження операції
-       const { data: opData, error: opError } = await supabase
-        .from('operations')
-        .insert([{
+      const payload = {
+        operation: {
           operation_num: formData.operation_num,
           patient_case_id: formData.patient_case_id,
           operation_date: formData.date || new Date().toISOString().split('T')[0],
           operation_type: formData.operation_type
-        }]).select();
+        },
+        expenses: expenses.map(e => ({ stock_batch_id: e.stock_batch_id, quantity: e.quantity }))
+      };
+      const result = await callAction('addOperation', payload, currentUser?.pin);
+      if (!result.success) { showMsg('error', result.error || 'Помилка збереження операції.'); return; }
 
-       if(opError) throw opError;
-       const newOp = opData[0];
-
-       // Збереження витрат
-       const expensesToInsert = expenses.map(e => ({
-          operation_id: newOp.id,
-          stock_batch_id: e.stock_batch_id,
-          quantity: e.quantity
-       }));
-       const { data: expData, error: expError } = await supabase.from('expenses').insert(expensesToInsert).select();
-       if(expError) throw expError;
-
-       // Оновлення залишків
-       for (const item of expenses) {
-          const batch = state.stock.find(s => s.id === item.stock_batch_id);
-          const newQty = batch.quantity - item.quantity;
-          await supabase.from('stock_batches').update({ quantity: newQty }).eq('id', batch.id);
-       }
-
-       dispatch({ type: 'ADD_OPERATION', payload: { operation: newOp, expenses: expData } });
-       setFormData({ operation_num: '', patient_case_id: '', operation_type: 'CABG On-pump', date: '' });
-       setExpenses([]);
-       showMsg('success', '✅ Операцію збережено в хмарі, матеріали списано!');
-    } catch(e) {
-       console.error(e);
-       showMsg('error', 'Помилка збереження бази даних.');
+      dispatch({ type: 'ADD_OPERATION', payload: result.data });
+      setFormData({ operation_num: '', patient_case_id: '', operation_type: 'CABG On-pump', date: '' });
+      setExpenses([]);
+      showMsg('success', '✅ Операцію збережено, матеріали списано!');
+    } catch (e) {
+      console.error("Apps Script Error:", e);
+      showMsg('error', "Помилка збереження: немає з'єднання з сервером.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -491,16 +482,17 @@ const PostOpExpense = ({ state, dispatch }) => {
             </div>
           )}
         </div>
-        <button onClick={submitOperation} disabled={expenses.length === 0} className={`w-full mt-6 py-4 rounded-2xl font-black text-lg transition-all duration-300 ${expenses.length > 0 ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-white shadow-lg hover:scale-[1.01]' : 'bg-slate-950 text-slate-700 border border-slate-800 cursor-not-allowed'}`}>Завершити операцію ({expenses.reduce((s,e) => s + e.quantity, 0)} шт)</button>
+        <button onClick={submitOperation} disabled={expenses.length === 0 || isSubmitting} className={`w-full mt-6 py-4 rounded-2xl font-black text-lg transition-all duration-300 ${expenses.length > 0 && !isSubmitting ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-white shadow-lg hover:scale-[1.01]' : 'bg-slate-950 text-slate-700 border border-slate-800 cursor-not-allowed'}`}>{isSubmitting ? 'Збереження...' : `Завершити операцію (${expenses.reduce((s,e) => s + e.quantity, 0)} шт)`}</button>
       </div>
     </div>
   );
 };
 
-const StockIn = ({ state, dispatch }) => {
+const StockIn = ({ state, dispatch, currentUser }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [formData, setFormData] = useState({ code: '', lot: '', serial: '', size: '', exp: '', quantity: 1 });
   const [message, setMessage] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
@@ -520,7 +512,7 @@ const StockIn = ({ state, dispatch }) => {
   const filteredMaterials = useMemo(() => {
     if (!searchQuery) return state.materials.slice(0, 10);
     const query = searchQuery.toLowerCase();
-    return state.materials.filter(m => 
+    return state.materials.filter(m =>
       m.name.toLowerCase().includes(query) || m.code.toLowerCase().includes(query)
     ).slice(0, 10);
   }, [searchQuery, state.materials]);
@@ -529,9 +521,9 @@ const StockIn = ({ state, dispatch }) => {
     setShowScanner(false);
     const parsed = parseBarcode(codeStr);
     if (!parsed.code) { showMsg('error', 'Неможливо розпізнати код.'); return; }
-    
+
     setFormData({ code: parsed.code, lot: parsed.lot || '', serial: parsed.serial || '', size: '', exp: parsed.exp || '', quantity: 1 });
-    
+
     const mat = state.materials.find(m => m.code === parsed.code);
     if (mat) {
       setSearchQuery(mat.name);
@@ -551,23 +543,29 @@ const StockIn = ({ state, dispatch }) => {
   const handleSave = async () => {
     if (!activeMaterial) { showMsg('error', "Матеріал не знайдено. Спочатку додайте його в довідник."); return; }
     if (!formData.lot || !formData.exp || formData.quantity <= 0) { showMsg('error', "Заповніть обов'язкові поля: LOT, Термін, Кількість."); return; }
-    if (formData.serial && state.stock.some(s => s.serial_number === formData.serial && s.quantity > 0)) {
-        showMsg('error', "Помилка: Такий серійний номер вже є на складі!"); return;
-    }
+    if (isSaving) return;
 
-    const batch = { material_id: activeMaterial.id, lot_number: formData.lot, serial_number: formData.serial, size: formData.size, expiration_date: formData.exp, quantity: Number(formData.quantity) };
-    
+    setIsSaving(true);
     try {
-       const { data, error } = await supabase.from('stock_batches').insert([batch]).select();
-       if(error) throw error;
+      const result = await callAction('addStock', {
+        material_id: activeMaterial.id,
+        lot_number: formData.lot,
+        serial_number: formData.serial,
+        size: formData.size,
+        expiration_date: formData.exp,
+        quantity: Number(formData.quantity)
+      }, currentUser?.pin);
+      if (!result.success) { showMsg('error', result.error || 'Помилка оприбуткування.'); return; }
 
-       dispatch({ type: 'ADD_STOCK', payload: data[0] });
-       setFormData({ code: '', lot: '', serial: '', size: '', exp: '', quantity: 1 });
-       setSearchQuery(''); 
-       showMsg('success', '✅ Товар успішно оприбутковано на склад!');
-    } catch(e) {
-       console.error(e);
-       showMsg('error', "Помилка бази даних");
+      dispatch({ type: 'ADD_STOCK', payload: result.data });
+      setFormData({ code: '', lot: '', serial: '', size: '', exp: '', quantity: 1 });
+      setSearchQuery('');
+      showMsg('success', '✅ Товар успішно оприбутковано на склад!');
+    } catch (e) {
+      console.error(e);
+      showMsg('error', "Помилка збереження: немає з'єднання з сервером.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -586,12 +584,12 @@ const StockIn = ({ state, dispatch }) => {
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Матеріал (Пошук або Код) *</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                <input 
-                  type="text" value={searchQuery} 
+                <input
+                  type="text" value={searchQuery}
                   onChange={e => { setSearchQuery(e.target.value); setFormData({ ...formData, code: e.target.value }); setShowDropdown(true); }}
                   onFocus={() => setShowDropdown(true)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-teal-400 focus:ring-2 focus:ring-teal-500 outline-none font-bold tracking-wide" 
-                  placeholder="Введіть назву або відскануйте код..." 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 pl-10 text-teal-400 focus:ring-2 focus:ring-teal-500 outline-none font-bold tracking-wide"
+                  placeholder="Введіть назву або відскануйте код..."
                 />
                 {showDropdown && (
                   <div className="absolute z-50 w-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
@@ -610,7 +608,7 @@ const StockIn = ({ state, dispatch }) => {
             </div>
 
             {activeMaterial && <div className="p-4 bg-teal-950/20 border border-teal-900/50 rounded-xl flex items-center gap-4"><div className="w-12 h-12 bg-slate-900 rounded-lg flex items-center justify-center border border-slate-800"><Database className="text-teal-500 opacity-50" size={24} /></div><div><p className="text-white font-bold text-sm">{activeMaterial.name}</p><p className="text-xs text-slate-400 mt-1">{activeMaterial.subcategory}</p></div></div>}
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">LOT Партія *</label><input type="text" value={formData.lot} onChange={e => setFormData({...formData, lot: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="ABC-123" /></div>
               <div className="space-y-1.5 md:col-span-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Серійний № (Опц)</label><input type="text" value={formData.serial} onChange={e => setFormData({...formData, serial: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="SN-000" /></div>
@@ -621,14 +619,14 @@ const StockIn = ({ state, dispatch }) => {
                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Придатний до *</label><input type="date" value={formData.exp} onChange={e => setFormData({...formData, exp: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none" style={{colorScheme:'dark'}}/></div>
                <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Кількість *</label><input type="number" min="1" value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-bold text-center text-lg" /></div>
             </div>
-            <button onClick={handleSave} className="w-full mt-6 bg-slate-800 hover:bg-teal-600 text-white font-black py-4 rounded-2xl transition-all duration-300 border border-slate-700 hover:border-teal-500">Оприбуткувати товар</button>
+            <button onClick={handleSave} disabled={isSaving} className="w-full mt-6 bg-slate-800 hover:bg-teal-600 text-white font-black py-4 rounded-2xl transition-all duration-300 border border-slate-700 hover:border-teal-500 disabled:opacity-50">{isSaving ? 'Збереження...' : 'Оприбуткувати товар'}</button>
          </div>
       </div>
     </div>
   );
 };
 
-const Catalog = ({ state, dispatch }) => {
+const Catalog = ({ state, dispatch, currentUser }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [showSubcatModal, setShowSubcatModal] = useState(false);
   const [newSubcat, setNewSubcat] = useState('');
@@ -638,27 +636,22 @@ const Catalog = ({ state, dispatch }) => {
   const handleSave = async () => {
     if(!formData.name || !formData.code) return;
     try {
-      if(isEditing) { 
-        const { error } = await supabase.from('materials').update(formData).eq('id', formData.id);
-        if(error) throw error;
-        dispatch({ type: 'UPDATE_MATERIAL', payload: formData }); 
-      } 
-      else { 
-        const newMat = { name: formData.name, code: formData.code, subcategory: formData.subcategory, min_stock: formData.min_stock };
-        const { data, error } = await supabase.from('materials').insert([newMat]).select();
-        if(error) throw error;
-        dispatch({ type: 'ADD_MATERIAL', payload: data[0] }); 
-      }
-      setFormData({ id: '', name: '', code: '', subcategory: (state.subcategories||[])[0]?.name||'', min_stock: 1 }); setIsEditing(false);
-    } catch(e) { console.error(e); alert("Помилка бази даних"); }
-  };
+      const result = await callAction('saveMaterial', formData, currentUser?.pin);
+      if (!result.success) { alert(result.error || "Помилка збереження матеріалу"); return; }
 
+      if (isEditing) dispatch({ type: 'UPDATE_MATERIAL', payload: result.data });
+      else dispatch({ type: 'ADD_MATERIAL', payload: result.data });
+
+      setFormData({ id: '', name: '', code: '', subcategory: (state.subcategories||[])[0]?.name||'', min_stock: 1 }); setIsEditing(false);
+    } catch(e) { console.error(e); alert("Помилка збереження: немає з'єднання з сервером."); }
+  };
   const handleDelete = async (id) => {
-     if(state.stock.some(s => s.material_id === id)) { alert("Неможливо видалити: матеріал має залишки на складі."); return; }
+     if(state.stock.some(s => s.material_id === id)) { alert("Неможливо видалити: матеріал має залишки на складі або історію."); return; }
      try {
-       await supabase.from('materials').delete().eq('id', id);
+       const result = await callAction('deleteMaterial', { id }, currentUser?.pin);
+       if (!result.success) { alert(result.error || "Помилка видалення"); return; }
        dispatch({ type: 'DELETE_MATERIAL', payload: id });
-     } catch(e) { console.error(e); }
+     } catch(e) { console.error(e); alert("Помилка видалення: немає з'єднання з сервером."); }
   };
   const handleScan = (codeStr) => {
     setShowScanner(false);
@@ -668,27 +661,24 @@ const Catalog = ({ state, dispatch }) => {
   const handleAddSubcat = async () => {
      if(!newSubcat.trim()) return;
      try {
-       const { data, error } = await supabase.from('subcategories').insert([{name: newSubcat.trim()}]).select();
-       if(error) throw error;
-       dispatch({type: 'ADD_SUBCATEGORY', payload: data[0]});
+       const result = await callAction('addSubcategory', { name: newSubcat.trim() }, currentUser?.pin);
+       if (!result.success) { alert(result.error || "Помилка збереження підкатегорії"); return; }
+       dispatch({type: 'ADD_SUBCATEGORY', payload: result.data});
        setNewSubcat('');
-     } catch(e) { console.error(e); }
+     } catch(e) { console.error(e); alert("Помилка збереження: немає з'єднання з сервером."); }
   };
   const handleDeleteSubcat = async (id) => {
-      const sub = state.subcategories.find(s=>s.id === id);
-      if(state.materials.some(m => m.subcategory === sub.name)) {
-          alert("Ця підкатегорія використовується в матеріалах. Змініть їх перед видаленням."); return;
-      }
       try {
-        await supabase.from('subcategories').delete().eq('id', id);
+        const result = await callAction('deleteSubcategory', { id }, currentUser?.pin);
+        if (!result.success) { alert(result.error || "Помилка видалення підкатегорії"); return; }
         dispatch({type: 'DELETE_SUBCATEGORY', payload: id});
-      } catch(e) { console.error(e); }
+      } catch(e) { console.error(e); alert("Помилка видалення: немає з'єднання з сервером."); }
   };
 
   return (
     <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-6">
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
-      
+
       {showSubcatModal && (
          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden p-6">
@@ -746,12 +736,13 @@ const Catalog = ({ state, dispatch }) => {
   );
 };
 
-const Inventory = ({ state, dispatch, isReadOnly }) => {
+const Inventory = ({ state, dispatch, isReadOnly, currentUser }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
   const [sortBy, setSortBy] = useState('exp_asc');
   const [writeOffModal, setWriteOffModal] = useState(null);
   const [historyModal, setHistoryModal] = useState(null);
+  const [isWritingOff, setIsWritingOff] = useState(false);
 
   const subcategories = useMemo(() => ['All', ...Array.from(new Set(state.materials.map(m => m.subcategory)))].sort(), [state.materials]);
 
@@ -774,23 +765,24 @@ const Inventory = ({ state, dispatch, isReadOnly }) => {
   }, [state, searchTerm, filterCategory, sortBy]);
 
   const handleWriteOff = async () => {
+      if (isWritingOff) return;
+      setIsWritingOff(true);
       try {
-        const payload = { stock_batch_id: writeOffModal.batch.unique_id, qty: writeOffModal.qty, reason: writeOffModal.reason };
-        const { data, error } = await supabase.from('writeoffs').insert([payload]).select();
-        if(error) throw error;
-        
-        await supabase.from('stock_batches').update({ quantity: writeOffModal.batch.quantity - writeOffModal.qty }).eq('id', writeOffModal.batch.unique_id);
-        
-        dispatch({ type: 'ADD_WRITEOFF', payload: data[0] });
+        const result = await callAction('addWriteoff', {
+          stock_batch_id: writeOffModal.stock_batch_id,
+          qty: writeOffModal.qty,
+          reason: writeOffModal.reason
+        }, currentUser?.pin);
+        if (!result.success) { alert(result.error || "Помилка списання"); return; }
+
+        dispatch({ type: 'ADD_WRITEOFF', payload: result.data });
         setWriteOffModal(null);
-      } catch(e) {
-        console.error(e);
-        alert("Помилка списання.");
-      }
+      } catch(e) { console.error(e); alert("Помилка списання: немає з'єднання з сервером."); }
+      finally { setIsWritingOff(false); }
   };
 
   const getBatchHistory = (batchId) => {
-      const arrived = state.stock.find(s=>s.id === batchId) || state.writeoffs.find(w=>w.stock_batch_id===batchId); 
+      const arrived = state.stock.find(s=>s.id === batchId) || state.writeoffs.find(w=>w.id===batchId);
       const ops = state.expenses.filter(e => e.stock_batch_id === batchId).map(e => {
          const op = state.operations.find(o => o.id === e.operation_id);
          return { type: 'operation', date: op?.operation_date || e.created_at, op_num: op?.operation_num, qty: e.quantity };
@@ -804,7 +796,7 @@ const Inventory = ({ state, dispatch, isReadOnly }) => {
     state.operations.forEach(op => {
       const opExpenses = state.expenses.filter(e => e.operation_id === op.id);
       opExpenses.forEach(exp => {
-        const batch = state.stock.find(s => s.id === exp.stock_batch_id) || state.writeoffs.find(w=>w.stock_batch_id===exp.stock_batch_id) || {};
+        const batch = state.stock.find(s => s.id === exp.stock_batch_id) || state.writeoffs.find(w=>w.id===exp.stock_batch_id) || {};
         const mat = state.materials.find(m => m.id === batch.material_id) || {};
         const row = [
           op.operation_date, op.operation_num, op.patient_case_id, op.operation_type,
@@ -814,10 +806,11 @@ const Inventory = ({ state, dispatch, isReadOnly }) => {
       });
     });
 
-    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" }); 
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `cardio_expenses_${new Date().toISOString().split('T')[0]}.csv`;
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `cardio_expenses_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -825,7 +818,7 @@ const Inventory = ({ state, dispatch, isReadOnly }) => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      
+
       {writeOffModal && (
          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md shadow-2xl p-6">
@@ -835,7 +828,7 @@ const Inventory = ({ state, dispatch, isReadOnly }) => {
                   <div><label className="text-[10px] font-bold text-slate-400 uppercase">Кількість (Макс: {writeOffModal.batch.quantity})</label><input type="number" min="1" max={writeOffModal.batch.quantity} value={writeOffModal.qty} onChange={e=>setWriteOffModal({...writeOffModal, qty: Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"/></div>
                   <div><label className="text-[10px] font-bold text-slate-400 uppercase">Причина</label><select value={writeOffModal.reason} onChange={e=>setWriteOffModal({...writeOffModal, reason: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none appearance-none"><option>Прострочено</option><option>Порушення стерильності</option><option>Падіння/Брак</option></select></div>
                </div>
-               <div className="flex gap-3"><button onClick={()=>setWriteOffModal(null)} className="flex-1 bg-slate-800 text-white font-bold py-3 rounded-xl">Скасувати</button><button onClick={handleWriteOff} className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 rounded-xl">Списати</button></div>
+               <div className="flex gap-3"><button onClick={()=>setWriteOffModal(null)} className="flex-1 bg-slate-800 text-white font-bold py-3 rounded-xl">Скасувати</button><button onClick={handleWriteOff} disabled={isWritingOff} className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-bold py-3 rounded-xl disabled:opacity-50">{isWritingOff ? 'Списання...' : 'Списати'}</button></div>
             </div>
          </div>
       )}
@@ -899,7 +892,7 @@ const Inventory = ({ state, dispatch, isReadOnly }) => {
                     <td className="px-5 py-4 text-right">
                        <div className="flex items-center justify-end gap-3">
                           <div className="font-black text-xl text-white">{item.quantity} <span className="text-xs text-slate-500 font-medium">шт</span></div>
-                          {!isReadOnly && <button onClick={(e) => { e.stopPropagation(); setWriteOffModal({batch: item, qty: 1, reason: 'Прострочено'}); }} className="p-2 bg-rose-950 text-rose-400 hover:text-white hover:bg-rose-900 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"><AlertTriangle size={16}/></button>}
+                          {!isReadOnly && <button onClick={(e) => { e.stopPropagation(); setWriteOffModal({batch: item, qty: 1, reason: 'Прострочено', stock_batch_id: item.unique_id}); }} className="p-2 bg-rose-950 text-rose-400 hover:text-white hover:bg-rose-900 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"><AlertTriangle size={16}/></button>}
                        </div>
                     </td>
                   </tr>
@@ -914,7 +907,7 @@ const Inventory = ({ state, dispatch, isReadOnly }) => {
   );
 };
 
-const UsersManager = ({ state, dispatch }) => {
+const UsersManager = ({ state, dispatch, currentUser }) => {
   const [formData, setFormData] = useState({ id: '', name: '', pin: '', role: 'user', permissions: ['inventory'] });
   const [isEditing, setIsEditing] = useState(false);
 
@@ -938,26 +931,23 @@ const UsersManager = ({ state, dispatch }) => {
     if (state.users.some(u => u.pin === formData.pin && u.id !== formData.id)) { alert("Цей ПІН-код вже використовується!"); return; }
 
     try {
-      if (isEditing) { 
-        await supabase.from('users').update(formData).eq('id', formData.id);
-        dispatch({ type: 'UPDATE_USER', payload: formData }); 
-      } 
-      else { 
-        const { data, error } = await supabase.from('users').insert([{name: formData.name, pin: formData.pin, role: formData.role, permissions: formData.permissions}]).select();
-        if(error) throw error;
-        dispatch({ type: 'ADD_USER', payload: data[0] }); 
-      }
+      const result = await callAction('saveUser', formData, currentUser?.pin);
+      if (!result.success) { alert(result.error || "Помилка збереження користувача"); return; }
+      if (isEditing) dispatch({ type: 'UPDATE_USER', payload: result.data });
+      else dispatch({ type: 'ADD_USER', payload: result.data });
+
       setFormData({ id: '', name: '', pin: '', role: 'user', permissions: ['inventory'] });
       setIsEditing(false);
-    } catch(e) { console.error(e); alert("Помилка збереження."); }
+    } catch(e) { console.error(e); alert("Помилка збереження: немає з'єднання з сервером."); }
   };
 
-  const handleDeleteUser = async (id) => {
-     try {
-       await supabase.from('users').delete().eq('id', id);
-       dispatch({type: 'DELETE_USER', payload: id});
-     } catch(e) { console.error(e); }
-  }
+  const handleDelete = async (id) => {
+    try {
+      const result = await callAction('deleteUser', { id }, currentUser?.pin);
+      if (!result.success) { alert(result.error || "Помилка видалення користувача"); return; }
+      dispatch({ type: 'DELETE_USER', payload: id });
+    } catch(e) { console.error(e); alert("Помилка видалення: немає з'єднання з сервером."); }
+  };
 
   return (
     <div className="animate-in slide-in-from-bottom-4 duration-500 space-y-6">
@@ -973,7 +963,7 @@ const UsersManager = ({ state, dispatch }) => {
                <label className="text-[10px] font-bold text-slate-400 uppercase pl-1">PIN-код (тільки цифри) *</label>
                <input type="text" maxLength="6" value={formData.pin} onChange={e => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-teal-400 font-mono text-lg tracking-widest text-center outline-none" placeholder="****" />
             </div>
-            
+
             {formData.role !== 'admin' && (
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <p className="text-[10px] font-bold text-slate-400 uppercase mb-3">Права доступу (вкладки)</p>
@@ -1006,14 +996,14 @@ const UsersManager = ({ state, dispatch }) => {
                   </td>
                   <td className="px-5 py-4"><span className="font-mono text-teal-400 bg-teal-500/10 px-2 py-1 rounded border border-teal-500/20">{u.pin}</span></td>
                   <td className="px-5 py-4">
-                    {u.role === 'admin' ? <span className="text-xs text-rose-400 font-bold">Повний доступ</span> : 
+                    {u.role === 'admin' ? <span className="text-xs text-rose-400 font-bold">Повний доступ</span> :
                     <div className="flex flex-wrap gap-1">
                       {u.permissions.map(p => <span key={p} className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-300">{availablePermissions.find(a=>a.id===p)?.label || p}</span>)}
                     </div>}
                   </td>
                   <td className="px-5 py-4 text-right">
                     <button onClick={() => {setFormData({...u}); setIsEditing(true);}} className="p-2 text-slate-400 hover:text-teal-400 bg-slate-950 rounded-lg mr-2"><Edit2 size={16}/></button>
-                    {u.role !== 'admin' && <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-slate-400 hover:text-rose-400 bg-slate-950 rounded-lg"><Trash2 size={16}/></button>}
+                    {u.role !== 'admin' && <button onClick={() => handleDelete(u.id)} className="p-2 text-slate-400 hover:text-rose-400 bg-slate-950 rounded-lg"><Trash2 size={16}/></button>}
                   </td>
                 </tr>
               ))}
@@ -1025,45 +1015,49 @@ const UsersManager = ({ state, dispatch }) => {
   );
 };
 
-/* STREAMING_CHUNK: Reducer and App Core */
+// Reducer — чиста функція над локальним станом; персистентність робить Apps Script + Google Sheets
 const reducer = (state, action) => {
-  let newState = { ...state };
   switch (action.type) {
-    case 'INIT': newState = action.payload; break;
-    case 'ADD_STOCK': newState.stock = [...state.stock, action.payload]; break;
-    case 'ADD_MATERIAL': newState.materials = [...state.materials, action.payload]; break;
-    case 'UPDATE_MATERIAL': newState.materials = state.materials.map(m => m.id === action.payload.id ? action.payload : m); break;
-    case 'DELETE_MATERIAL': newState.materials = state.materials.filter(m => m.id !== action.payload); break;
-    case 'ADD_SUBCATEGORY': newState.subcategories = [...(state.subcategories||[]), action.payload]; break;
-    case 'DELETE_SUBCATEGORY': newState.subcategories = state.subcategories.filter(s => s.id !== action.payload); break;
-    case 'ADD_USER': newState.users = [...state.users, action.payload]; break;
-    case 'UPDATE_USER': newState.users = state.users.map(u => u.id === action.payload.id ? action.payload : u); break;
-    case 'DELETE_USER': newState.users = state.users.filter(u => u.id !== action.payload); break;
-    case 'ADD_WRITEOFF': 
-        newState.writeoffs = [...state.writeoffs, action.payload];
-        newState.stock = state.stock.map(b => b.id === action.payload.stock_batch_id ? {...b, quantity: b.quantity - action.payload.qty} : b);
-        break;
-    case 'ADD_OPERATION':
+    case 'INIT': return action.payload;
+    case 'ADD_STOCK': return { ...state, stock: [...state.stock, action.payload] };
+    case 'ADD_MATERIAL': return { ...state, materials: [...state.materials, action.payload] };
+    case 'UPDATE_MATERIAL': return { ...state, materials: state.materials.map(m => m.id === action.payload.id ? action.payload : m) };
+    case 'DELETE_MATERIAL': return { ...state, materials: state.materials.filter(m => m.id !== action.payload) };
+    case 'ADD_SUBCATEGORY': return { ...state, subcategories: [...(state.subcategories||[]), action.payload] };
+    case 'DELETE_SUBCATEGORY': return { ...state, subcategories: state.subcategories.filter(s => s.id !== action.payload) };
+    case 'ADD_USER': return { ...state, users: [...state.users, action.payload] };
+    case 'UPDATE_USER': return { ...state, users: state.users.map(u => u.id === action.payload.id ? action.payload : u) };
+    case 'DELETE_USER': return { ...state, users: state.users.filter(u => u.id !== action.payload) };
+    case 'ADD_WRITEOFF':
+      return {
+        ...state,
+        writeoffs: [...state.writeoffs, action.payload],
+        stock: state.stock.map(b => b.id === action.payload.stock_batch_id ? {...b, quantity: b.quantity - action.payload.qty} : b)
+      };
+    case 'ADD_OPERATION': {
       const { operation, expenses } = action.payload;
-      newState.operations = [...state.operations, operation];
-      newState.expenses = [...state.expenses, ...expenses];
-      newState.stock = state.stock.map(batch => {
+      const updatedStock = state.stock.map(batch => {
          const used = expenses.find(e => e.stock_batch_id === batch.id);
          return used ? { ...batch, quantity: batch.quantity - used.quantity } : batch;
       });
-      break;
-    case 'DELETE_OPERATION':
+      return { ...state, operations: [...state.operations, operation], expenses: [...state.expenses, ...expenses], stock: updatedStock };
+    }
+    case 'DELETE_OPERATION': {
       const opId = action.payload;
       const expsToRestore = state.expenses.filter(e => e.operation_id === opId);
-      newState.operations = state.operations.filter(o => o.id !== opId);
-      newState.expenses = state.expenses.filter(e => e.operation_id !== opId);
-      newState.stock = state.stock.map(batch => {
+      const restoredStock = state.stock.map(batch => {
          const rest = expsToRestore.find(e => e.stock_batch_id === batch.id);
          return rest ? { ...batch, quantity: batch.quantity + rest.quantity } : batch;
       });
-      break;
+      return {
+        ...state,
+        operations: state.operations.filter(o => o.id !== opId),
+        expenses: state.expenses.filter(e => e.operation_id !== opId),
+        stock: restoredStock
+      };
+    }
+    default: return state;
   }
-  return newState;
 };
 
 export default function App() {
@@ -1072,80 +1066,84 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [pin, setPin] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
-  
+
   const [state, dispatch] = React.useReducer(reducer, { materials: [], stock: [], operations: [], expenses: [], subcategories: [], writeoffs: [], users: [] });
   const [isLoaded, setIsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
-    async function loadCloudData() {
-       try {
-          const [matRes, stockRes, opRes, expRes, subRes, writeRes, usersRes] = await Promise.all([
-             supabase.from('materials').select('*'),
-             supabase.from('stock_batches').select('*'),
-             supabase.from('operations').select('*'),
-             supabase.from('expenses').select('*'),
-             supabase.from('subcategories').select('*'),
-             supabase.from('writeoffs').select('*'),
-             supabase.from('users').select('*')
-          ]);
+    async function fetchCloudData() {
+      try {
+        const data = await fetchAllData();
 
-          let usersList = usersRes.data || [];
-          if(usersList.length === 0) {
-             // Create default admin if DB is completely empty
-             const defaultAdmin = { name: 'Головний Адміністратор', pin: '2105', role: 'admin', permissions: ['all'] };
-             const { data } = await supabase.from('users').insert([defaultAdmin]).select();
-             if(data) usersList = [data[0]];
+        dispatch({
+          type: 'INIT',
+          payload: {
+            materials: data.materials || [],
+            stock: data.stock || [],
+            operations: data.operations || [],
+            expenses: data.expenses || [],
+            subcategories: (data.subcategories && data.subcategories.length > 0) ? data.subcategories : DEFAULT_SUBCATEGORIES,
+            writeoffs: data.writeoffs || [],
+            users: data.users || []
           }
-
-          dispatch({ type: 'INIT', payload: { 
-            materials: matRes.data || [], 
-            stock: stockRes.data || [], 
-            operations: opRes.data || [], 
-            expenses: expRes.data || [], 
-            subcategories: subRes.data || [], 
-            writeoffs: writeRes.data || [], 
-            users: usersList
-          } });
-       } catch (e) {
-          console.error("Cloud DB load error:", e);
-       } finally {
-          setIsLoaded(true);
-       }
+        });
+        setIsLoaded(true);
+      } catch (error) {
+        console.error("Помилка завантаження даних:", error);
+        setLoadError(error.message || "Невідома помилка з'єднання з Apps Script.");
+      }
     }
-    loadCloudData();
+    fetchCloudData();
   }, []);
 
   const handlePin = (val) => {
      const newPin = pin + val;
      setPin(newPin);
-     
+
      const foundUser = state.users.find(u => u.pin === newPin);
-     
-     if (foundUser) { 
+
+     if (foundUser) {
        setCurrentUser(foundUser);
-       setIsLocked(false); 
-       setShowAuth(false); 
-       setPin(''); 
+       setIsLocked(false);
+       setShowAuth(false);
+       setPin('');
        if (foundUser.role === 'admin') setActiveTab('dashboard');
        else setActiveTab(foundUser.permissions.includes('postop') ? 'postop' : 'inventory');
-     } 
-     else if (newPin.length >= 4) { 
-       setTimeout(() => setPin(''), 300); 
+     }
+     else if (newPin.length >= 4) {
+       setTimeout(() => setPin(''), 300);
      }
   };
 
   const hasAccess = (tabId) => {
      if (!currentUser) return false;
      if (currentUser.role === 'admin') return true;
-     if (tabId === 'inventory') return true; 
+     if (tabId === 'inventory') return true;
      return currentUser.permissions.includes(tabId);
   };
 
-  if (!isLoaded) return <div className="min-h-screen bg-[#020817] flex items-center justify-center"><HeartPulse size={48} className="animate-pulse text-teal-500" /></div>;
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[#020817] flex flex-col items-center justify-center gap-4 text-rose-400 p-6 text-center">
+        <AlertTriangle size={48} />
+        <p className="font-bold">Не вдалося завантажити дані.</p>
+        <p className="text-sm text-slate-400 max-w-md">{loadError}</p>
+        <p className="text-xs text-slate-500 max-w-md">Перевірте URL Apps Script у appsScriptClient.js та налаштування деплою (Execute as: Me, Who has access: Anyone).</p>
+      </div>
+    );
+  }
+
+  if (!isLoaded) return (
+    <div className="min-h-screen bg-[#020817] flex flex-col items-center justify-center gap-4">
+      <HeartPulse size={48} className="animate-pulse text-teal-500" />
+      <span className="text-slate-500 text-xs font-bold uppercase tracking-widest">З'єднання з базою...</span>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[#020817] text-slate-200 pb-24 md:pb-0 font-sans">
-      
+
       {showAuth && (
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex justify-center items-center p-4">
            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl flex flex-col items-center animate-in zoom-in-95 duration-200">
@@ -1194,12 +1192,12 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
         {isLocked && activeTab !== 'inventory' && setActiveTab('inventory')}
-        {activeTab === 'dashboard' && hasAccess('dashboard') && <Dashboard state={state} dispatch={dispatch} />}
-        {activeTab === 'postop' && hasAccess('postop') && <PostOpExpense state={state} dispatch={dispatch} />}
-        {activeTab === 'stockin' && hasAccess('stockin') && <StockIn state={state} dispatch={dispatch} />}
-        {activeTab === 'catalog' && hasAccess('catalog') && <Catalog state={state} dispatch={dispatch} />}
-        {activeTab === 'inventory' && <Inventory state={state} dispatch={dispatch} isReadOnly={isLocked} />}
-        {activeTab === 'users' && currentUser?.role === 'admin' && <UsersManager state={state} dispatch={dispatch} />}
+        {activeTab === 'dashboard' && hasAccess('dashboard') && <Dashboard state={state} dispatch={dispatch} currentUser={currentUser} />}
+        {activeTab === 'postop' && hasAccess('postop') && <PostOpExpense state={state} dispatch={dispatch} currentUser={currentUser} />}
+        {activeTab === 'stockin' && hasAccess('stockin') && <StockIn state={state} dispatch={dispatch} currentUser={currentUser} />}
+        {activeTab === 'catalog' && hasAccess('catalog') && <Catalog state={state} dispatch={dispatch} currentUser={currentUser} />}
+        {activeTab === 'inventory' && <Inventory state={state} dispatch={dispatch} isReadOnly={isLocked} currentUser={currentUser} />}
+        {activeTab === 'users' && currentUser?.role === 'admin' && <UsersManager state={state} dispatch={dispatch} currentUser={currentUser} />}
       </main>
 
       {!isLocked && (
@@ -1207,11 +1205,11 @@ export default function App() {
           <div className="flex justify-around items-center h-20 px-2">
             {hasAccess('dashboard') && <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1.5 ${activeTab==='dashboard'?'text-teal-400':'text-slate-500'}`}><Activity size={22}/></button>}
             {hasAccess('stockin') && <button onClick={() => setActiveTab('stockin')} className={`flex flex-col items-center gap-1.5 ${activeTab==='stockin'?'text-teal-400':'text-slate-500'}`}><PackagePlus size={22}/></button>}
-            
+
             {hasAccess('postop') && (
                <div className="relative -top-6"><button onClick={() => setActiveTab('postop')} className={`h-16 w-16 rounded-full flex items-center justify-center shadow-lg border-4 border-[#020817] ${activeTab==='postop'?'bg-teal-400 text-slate-950':'bg-slate-800 text-teal-400'}`}><HeartPulse size={28} strokeWidth={2.5}/></button></div>
             )}
-            
+
             <button onClick={() => setActiveTab('inventory')} className={`flex flex-col items-center gap-1.5 ${activeTab==='inventory'?'text-teal-400':'text-slate-500'}`}><Database size={22}/></button>
             {hasAccess('catalog') && <button onClick={() => setActiveTab('catalog')} className={`flex flex-col items-center gap-1.5 ${activeTab==='catalog'?'text-teal-400':'text-slate-500'}`}><Edit2 size={22}/></button>}
           </div>
