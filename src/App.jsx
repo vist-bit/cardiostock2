@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   HeartPulse, ScanBarcode, PackagePlus, Activity, AlertTriangle, Database, Download, CheckCircle,
   X, Search, Trash2, Camera, Calendar, Filter, ArrowDownUp, Lock, Unlock, Edit2, Clock,
-  PieChart as PieChartIcon, BarChart3, Users, Shield
+  PieChart as PieChartIcon, BarChart3, Users, Shield, ClipboardList
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { fetchAllData, callAction } from './appsScriptClient';
@@ -123,7 +123,7 @@ const BarcodeScanner = ({ onScan, onClose }) => {
   );
 };
 
-const Dashboard = ({ state, dispatch, currentUser }) => {
+const Dashboard = ({ state, dispatch, sessionPin }) => {
   const [selectedOp, setSelectedOp] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -165,7 +165,7 @@ const Dashboard = ({ state, dispatch, currentUser }) => {
     if (isDeleting) return;
     setIsDeleting(true);
     try {
-      const result = await callAction('deleteOperation', { operationId: selectedOp.id }, currentUser?.pin);
+      const result = await callAction('deleteOperation', { operationId: selectedOp.id }, sessionPin);
       if (!result.success) { alert(result.error || "Помилка видалення операції."); return; }
 
       dispatch({ type: 'DELETE_OPERATION', payload: selectedOp.id });
@@ -354,12 +354,201 @@ const SearchableDropdown = ({ state, onSelect }) => {
   );
 };
 
-const PostOpExpense = ({ state, dispatch, currentUser }) => {
+const TemplateManagerModal = ({ state, dispatch, sessionPin, onClose }) => {
+  const [editingId, setEditingId] = useState(null);
+  const [name, setName] = useState('');
+  const [operationType, setOperationType] = useState('CABG On-pump');
+  const [items, setItems] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(null);
+  const [materialSearch, setMaterialSearch] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (searchRef.current && !searchRef.current.contains(event.target)) setShowSuggestions(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const materialSuggestions = useMemo(() => {
+    if (!materialSearch) return [];
+    const q = materialSearch.toLowerCase();
+    return state.materials.filter(m => m.name.toLowerCase().includes(q) || m.code.toLowerCase().includes(q)).slice(0, 8);
+  }, [materialSearch, state.materials]);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setName('');
+    setOperationType('CABG On-pump');
+    setItems([]);
+  };
+
+  const startEdit = (tpl) => {
+    setEditingId(tpl.id);
+    setName(tpl.name);
+    setOperationType(tpl.operation_type || 'CABG On-pump');
+    const tplItems = state.templateItems
+      .filter(ti => ti.template_id === tpl.id)
+      .map(ti => {
+        const mat = state.materials.find(m => m.id === ti.material_id);
+        return { material_id: ti.material_id, name: mat ? mat.name : '(матеріал видалено з довідника)', quantity: ti.quantity };
+      });
+    setItems(tplItems);
+  };
+
+  const addMaterial = (mat) => {
+    setItems(prev => {
+      const existing = prev.find(i => i.material_id === mat.id);
+      if (existing) return prev.map(i => i.material_id === mat.id ? { ...i, quantity: i.quantity + 1 } : i);
+      return [...prev, { material_id: mat.id, name: mat.name, quantity: 1 }];
+    });
+    setMaterialSearch('');
+    setShowSuggestions(false);
+  };
+
+  const handleSave = async () => {
+    if (!name.trim()) { alert('Введіть назву шаблону.'); return; }
+    if (items.length === 0) { alert('Додайте хоча б один матеріал.'); return; }
+    if (isSaving) return;
+
+    setIsSaving(true);
+    try {
+      const payload = {
+        id: editingId || '',
+        name: name.trim(),
+        operation_type: operationType,
+        items: items.map(i => ({ material_id: i.material_id, quantity: i.quantity }))
+      };
+      const result = await callAction('saveTemplate', payload, sessionPin);
+      if (!result.success) { alert(result.error || 'Помилка збереження шаблону.'); return; }
+      dispatch({ type: editingId ? 'UPDATE_TEMPLATE' : 'ADD_TEMPLATE', payload: result.data });
+      resetForm();
+    } catch (e) {
+      console.error(e);
+      alert("Помилка збереження: немає з'єднання з сервером.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    setIsDeleting(id);
+    try {
+      const result = await callAction('deleteTemplate', { id }, sessionPin);
+      if (!result.success) { alert(result.error || 'Помилка видалення шаблону.'); return; }
+      dispatch({ type: 'DELETE_TEMPLATE', payload: id });
+      if (editingId === id) resetForm();
+    } catch (e) {
+      console.error(e);
+      alert("Помилка видалення: немає з'єднання з сервером.");
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950 shrink-0">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2"><ClipboardList className="text-teal-500"/> Шаблони списання</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full"><X size={18}/></button>
+        </div>
+
+        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          <div>
+            <h4 className="text-sm font-bold text-slate-300 mb-3">{editingId ? 'Редагування шаблону' : 'Новий шаблон'}</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-1">
+              <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Назва (напр. АКШ)" className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:ring-2 focus:ring-teal-500"/>
+              <select value={operationType} onChange={e => setOperationType(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none appearance-none"><option>CABG On-pump</option><option>CABG Off-pump</option><option>AVR (Аортальний клапан)</option><option>MVR (Мітральний клапан)</option><option>Bentall</option><option>Комбінована</option></select>
+            </div>
+            <p className="text-[11px] text-slate-500 mb-3">Тип операції підставиться автоматично при застосуванні шаблону.</p>
+
+            <div className="relative" ref={searchRef}>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                <input
+                  type="text" value={materialSearch}
+                  onChange={e => { setMaterialSearch(e.target.value); setShowSuggestions(true); }}
+                  onFocus={() => setShowSuggestions(true)}
+                  placeholder="Пошук матеріалу з довідника для додавання в шаблон..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pl-9 pr-3 text-sm text-white outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-600"
+                />
+              </div>
+              {showSuggestions && materialSearch && (
+                <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-48 overflow-y-auto">
+                  {materialSuggestions.length > 0 ? materialSuggestions.map(mat => (
+                    <div key={mat.id} onClick={() => addMaterial(mat)} className="p-2.5 hover:bg-slate-700 cursor-pointer border-b border-slate-700/50 last:border-0">
+                      <p className="text-sm font-bold text-white">{mat.name}</p>
+                      <p className="text-[10px] text-slate-400">{mat.subcategory} · {mat.code}</p>
+                    </div>
+                  )) : <div className="p-3 text-center text-xs text-slate-500">Нічого не знайдено в довіднику</div>}
+                </div>
+              )}
+            </div>
+
+            {items.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {items.map(item => (
+                  <div key={item.material_id} className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <p className="text-sm font-bold text-white">{item.name}</p>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center bg-slate-900 rounded-lg border border-slate-800">
+                        <button onClick={() => setItems(prev => prev.map(i => i.material_id === item.material_id ? { ...i, quantity: Math.max(1, i.quantity - 1) } : i))} className="px-3 py-1 text-slate-400 hover:text-white">-</button>
+                        <div className="px-3 py-1 text-white text-sm font-bold min-w-[2.5rem] text-center">{item.quantity}</div>
+                        <button onClick={() => setItems(prev => prev.map(i => i.material_id === item.material_id ? { ...i, quantity: i.quantity + 1 } : i))} className="px-3 py-1 text-slate-400 hover:text-white">+</button>
+                      </div>
+                      <button onClick={() => setItems(prev => prev.filter(i => i.material_id !== item.material_id))} className="p-1.5 text-rose-500 hover:bg-rose-500/20 rounded-lg"><Trash2 size={16}/></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500 mt-3">Ще жодного матеріалу не додано.</p>
+            )}
+
+            <div className="flex gap-3 mt-4">
+              <button onClick={handleSave} disabled={isSaving} className="flex-1 bg-teal-600 hover:bg-teal-500 text-white font-bold py-3 rounded-xl disabled:opacity-50">{isSaving ? 'Збереження...' : (editingId ? 'Оновити шаблон' : 'Зберегти шаблон')}</button>
+              {editingId && <button onClick={resetForm} className="bg-slate-800 text-slate-300 font-bold py-3 px-5 rounded-xl">Скасувати</button>}
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-800">
+            <h4 className="text-sm font-bold text-slate-300 mb-3">Наявні шаблони</h4>
+            {(!state.templates || state.templates.length === 0) ? (
+              <p className="text-sm text-slate-500">Ще немає жодного шаблону.</p>
+            ) : (
+              <div className="space-y-2">
+                {state.templates.map(tpl => (
+                  <div key={tpl.id} className="flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <div>
+                      <p className="text-sm font-bold text-white">{tpl.name}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">{state.templateItems.filter(ti => ti.template_id === tpl.id).length} матеріалів{tpl.operation_type ? ` · ${tpl.operation_type}` : ''}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => startEdit(tpl)} className="p-2 text-slate-400 hover:text-teal-400 bg-slate-900 rounded-lg"><Edit2 size={16}/></button>
+                      <button onClick={() => handleDelete(tpl.id)} disabled={isDeleting === tpl.id} className="p-2 text-slate-400 hover:text-rose-400 bg-slate-900 rounded-lg disabled:opacity-50"><Trash2 size={16}/></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PostOpExpense = ({ state, dispatch, sessionPin }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [formData, setFormData] = useState({operation_num:"", patient_case_id:"", operation_type:"CABG On-pump", date:""});
   const [expenses, setExpenses] = useState([]);
   const [scanMessage, setScanMessage] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
 
   const showMsg = (type, text) => { setScanMessage({type, text}); setTimeout(() => setScanMessage(null), 4000); };
 
@@ -375,6 +564,48 @@ const PostOpExpense = ({ state, dispatch, currentUser }) => {
         return [...prev, { id: genId('exp'), stock_batch_id: batch.id, material_id: material.id, name: material.name, lot: batch.lot_number, serial: batch.serial_number, size: batch.size, quantity: 1, max: batch.quantity }];
       }
     });
+  };
+
+  const handleApplyTemplate = (tpl) => {
+    const tplItems = state.templateItems.filter(ti => ti.template_id === tpl.id);
+    if (tplItems.length === 0) { showMsg('error', 'У цьому шаблоні немає матеріалів.'); return; }
+
+    // Рахуємо весь план одразу (яку партію й скільки додати на кожен пункт шаблону),
+    // виходячи з поточного кошика, і застосовуємо одним оновленням стану —
+    // а не по одному setExpenses(prev => ...) на пункт.
+    let workingCart = [...expenses];
+    const problems = [];
+    let addedCount = 0;
+
+    tplItems.forEach(item => {
+      const material = state.materials.find(m => m.id === item.material_id);
+      if (!material) { problems.push('матеріал видалено з довідника'); return; }
+
+      const batches = state.stock
+        .filter(s => s.material_id === material.id && s.quantity > 0)
+        .sort((a, b) => new Date(a.expiration_date) - new Date(b.expiration_date));
+      if (batches.length === 0) { problems.push(`${material.name}: немає в наявності`); return; }
+
+      const batch = batches[0];
+      const existingIdx = workingCart.findIndex(e => e.stock_batch_id === batch.id);
+      const already = existingIdx >= 0 ? workingCart[existingIdx].quantity : 0;
+      const qtyToAdd = Math.min(Number(item.quantity), batch.quantity - already);
+      if (qtyToAdd <= 0) { problems.push(`${material.name}: у кошику вже максимум доступного`); return; }
+
+      if (existingIdx >= 0) {
+        workingCart = workingCart.map((e, i) => i === existingIdx ? { ...e, quantity: e.quantity + qtyToAdd } : e);
+      } else {
+        workingCart = [...workingCart, { id: genId('exp'), stock_batch_id: batch.id, material_id: material.id, name: material.name, lot: batch.lot_number, serial: batch.serial_number, size: batch.size, quantity: qtyToAdd, max: batch.quantity }];
+      }
+      addedCount++;
+      if (qtyToAdd < Number(item.quantity)) problems.push(`${material.name}: додано ${qtyToAdd} з ${item.quantity}`);
+    });
+
+    setExpenses(workingCart);
+    if (tpl.operation_type) setFormData(prev => ({ ...prev, operation_type: tpl.operation_type }));
+
+    if (problems.length > 0) showMsg('error', `"${tpl.name}": ${problems.join('; ')}`);
+    else showMsg('success', `Шаблон "${tpl.name}" застосовано (${addedCount} поз.)`);
   };
 
   const handleScan = (codeStr) => {
@@ -412,7 +643,7 @@ const PostOpExpense = ({ state, dispatch, currentUser }) => {
         },
         expenses: expenses.map(e => ({ stock_batch_id: e.stock_batch_id, quantity: e.quantity }))
       };
-      const result = await callAction('addOperation', payload, currentUser?.pin);
+      const result = await callAction('addOperation', payload, sessionPin);
       if (!result.success) { showMsg('error', result.error || 'Помилка збереження операції.'); return; }
 
       dispatch({ type: 'ADD_OPERATION', payload: result.data });
@@ -430,6 +661,7 @@ const PostOpExpense = ({ state, dispatch, currentUser }) => {
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in slide-in-from-bottom-4 duration-500">
       {showScanner && <BarcodeScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
+      {showTemplateManager && <TemplateManagerModal state={state} dispatch={dispatch} sessionPin={sessionPin} onClose={() => setShowTemplateManager(false)} />}
       {scanMessage && (
         <div className={`p-4 rounded-2xl border flex items-center gap-3 shadow-lg ${scanMessage.type === 'error' ? 'bg-rose-950/80 border-rose-900 text-rose-200' : 'bg-teal-950/80 border-teal-900 text-teal-200'}`}>
           {scanMessage.type === 'error' ? <AlertTriangle size={20} className="text-rose-500" /> : <CheckCircle size={20} className="text-teal-500" />}
@@ -439,6 +671,23 @@ const PostOpExpense = ({ state, dispatch, currentUser }) => {
 
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl">
         <h2 className="text-xl font-black text-white mb-8 flex items-center gap-3"><div className="p-2 bg-rose-500/10 rounded-xl text-rose-500"><Activity size={24} /></div>Списання на операцію</h2>
+
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><ClipboardList size={14} className="text-teal-500"/> Шаблони списання</h3>
+            <button onClick={() => setShowTemplateManager(true)} className="text-xs text-teal-400 hover:text-teal-300 font-bold flex items-center gap-1"><Edit2 size={12}/> Керувати шаблонами</button>
+          </div>
+          {state.templates && state.templates.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {state.templates.map(tpl => (
+                <button key={tpl.id} onClick={() => handleApplyTemplate(tpl)} className="px-4 py-2 bg-slate-800 hover:bg-teal-600 border border-slate-700 hover:border-teal-500 rounded-xl text-sm font-bold text-white transition-colors">{tpl.name}</button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">Ще немає жодного шаблону — натисніть "Керувати шаблонами", щоб створити перший (напр. "АКШ").</p>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
           <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">№ Операції *</label><input type="text" value={formData.operation_num} onChange={e => setFormData({...formData, operation_num: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="Напр. 1024" /></div>
           <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">ID Пацієнта (ІБ) *</label><input type="text" value={formData.patient_case_id} onChange={e => setFormData({...formData, patient_case_id: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white focus:ring-2 focus:ring-teal-500 outline-none font-mono" placeholder="ІБ-2026/45" /></div>
@@ -488,7 +737,7 @@ const PostOpExpense = ({ state, dispatch, currentUser }) => {
   );
 };
 
-const StockIn = ({ state, dispatch, currentUser }) => {
+const StockIn = ({ state, dispatch, sessionPin }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [formData, setFormData] = useState({ code: '', lot: '', serial: '', size: '', exp: '', quantity: 1 });
   const [message, setMessage] = useState(null);
@@ -554,7 +803,7 @@ const StockIn = ({ state, dispatch, currentUser }) => {
         size: formData.size,
         expiration_date: formData.exp,
         quantity: Number(formData.quantity)
-      }, currentUser?.pin);
+      }, sessionPin);
       if (!result.success) { showMsg('error', result.error || 'Помилка оприбуткування.'); return; }
 
       dispatch({ type: 'ADD_STOCK', payload: result.data });
@@ -626,17 +875,21 @@ const StockIn = ({ state, dispatch, currentUser }) => {
   );
 };
 
-const Catalog = ({ state, dispatch, currentUser }) => {
+const Catalog = ({ state, dispatch, sessionPin }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [showSubcatModal, setShowSubcatModal] = useState(false);
   const [newSubcat, setNewSubcat] = useState('');
   const [formData, setFormData] = useState({ id: '', name: '', code: '', subcategory: (state.subcategories||[])[0]?.name||'', min_stock: 1 });
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isAddingSubcat, setIsAddingSubcat] = useState(false);
 
   const handleSave = async () => {
     if(!formData.name || !formData.code) return;
+    if (isSaving) return;
+    setIsSaving(true);
     try {
-      const result = await callAction('saveMaterial', formData, currentUser?.pin);
+      const result = await callAction('saveMaterial', formData, sessionPin);
       if (!result.success) { alert(result.error || "Помилка збереження матеріалу"); return; }
 
       if (isEditing) dispatch({ type: 'UPDATE_MATERIAL', payload: result.data });
@@ -644,11 +897,12 @@ const Catalog = ({ state, dispatch, currentUser }) => {
 
       setFormData({ id: '', name: '', code: '', subcategory: (state.subcategories||[])[0]?.name||'', min_stock: 1 }); setIsEditing(false);
     } catch(e) { console.error(e); alert("Помилка збереження: немає з'єднання з сервером."); }
+    finally { setIsSaving(false); }
   };
   const handleDelete = async (id) => {
      if(state.stock.some(s => s.material_id === id)) { alert("Неможливо видалити: матеріал має залишки на складі або історію."); return; }
      try {
-       const result = await callAction('deleteMaterial', { id }, currentUser?.pin);
+       const result = await callAction('deleteMaterial', { id }, sessionPin);
        if (!result.success) { alert(result.error || "Помилка видалення"); return; }
        dispatch({ type: 'DELETE_MATERIAL', payload: id });
      } catch(e) { console.error(e); alert("Помилка видалення: немає з'єднання з сервером."); }
@@ -660,16 +914,19 @@ const Catalog = ({ state, dispatch, currentUser }) => {
   };
   const handleAddSubcat = async () => {
      if(!newSubcat.trim()) return;
+     if (isAddingSubcat) return;
+     setIsAddingSubcat(true);
      try {
-       const result = await callAction('addSubcategory', { name: newSubcat.trim() }, currentUser?.pin);
+       const result = await callAction('addSubcategory', { name: newSubcat.trim() }, sessionPin);
        if (!result.success) { alert(result.error || "Помилка збереження підкатегорії"); return; }
        dispatch({type: 'ADD_SUBCATEGORY', payload: result.data});
        setNewSubcat('');
      } catch(e) { console.error(e); alert("Помилка збереження: немає з'єднання з сервером."); }
+     finally { setIsAddingSubcat(false); }
   };
   const handleDeleteSubcat = async (id) => {
       try {
-        const result = await callAction('deleteSubcategory', { id }, currentUser?.pin);
+        const result = await callAction('deleteSubcategory', { id }, sessionPin);
         if (!result.success) { alert(result.error || "Помилка видалення підкатегорії"); return; }
         dispatch({type: 'DELETE_SUBCATEGORY', payload: id});
       } catch(e) { console.error(e); alert("Помилка видалення: немає з'єднання з сервером."); }
@@ -688,7 +945,7 @@ const Catalog = ({ state, dispatch, currentUser }) => {
                </div>
                <div className="flex gap-2 mb-6">
                   <input type="text" value={newSubcat} onChange={e=>setNewSubcat(e.target.value)} placeholder="Нова підкатегорія..." className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"/>
-                  <button onClick={handleAddSubcat} className="bg-teal-600 hover:bg-teal-500 text-white px-4 rounded-xl font-bold">Додати</button>
+                  <button onClick={handleAddSubcat} disabled={isAddingSubcat} className="bg-teal-600 hover:bg-teal-500 text-white px-4 rounded-xl font-bold disabled:opacity-50">{isAddingSubcat ? '...' : 'Додати'}</button>
                </div>
                <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
                   {(state.subcategories||[]).map(sc => (
@@ -716,7 +973,7 @@ const Catalog = ({ state, dispatch, currentUser }) => {
             </div>
             <div><label className="text-[10px] font-bold text-slate-400 uppercase pl-1">Мін. залишок (шт)</label><input type="number" value={formData.min_stock} onChange={e=>setFormData({...formData,min_stock:Number(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none font-bold text-center"/></div>
           </div>
-          <button onClick={handleSave} className="w-full mt-6 bg-teal-600 hover:bg-teal-500 text-white font-bold py-3.5 rounded-xl transition-colors">{isEditing ? 'Оновити' : 'Зберегти'}</button>
+          <button onClick={handleSave} disabled={isSaving} className="w-full mt-6 bg-teal-600 hover:bg-teal-500 text-white font-bold py-3.5 rounded-xl transition-colors disabled:opacity-50">{isSaving ? 'Збереження...' : (isEditing ? 'Оновити' : 'Зберегти')}</button>
           {isEditing && <button onClick={()=>{setIsEditing(false); setFormData({id:'',name:'',code:'',subcategory:(state.subcategories||[])[0]?.name||'',min_stock:1})}} className="w-full mt-3 bg-slate-800 text-slate-300 font-bold py-3.5 rounded-xl">Скасувати</button>}
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl lg:col-span-2">
@@ -736,7 +993,7 @@ const Catalog = ({ state, dispatch, currentUser }) => {
   );
 };
 
-const Inventory = ({ state, dispatch, isReadOnly, currentUser }) => {
+const Inventory = ({ state, dispatch, isReadOnly, sessionPin }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
   const [sortBy, setSortBy] = useState('exp_asc');
@@ -772,7 +1029,7 @@ const Inventory = ({ state, dispatch, isReadOnly, currentUser }) => {
           stock_batch_id: writeOffModal.stock_batch_id,
           qty: writeOffModal.qty,
           reason: writeOffModal.reason
-        }, currentUser?.pin);
+        }, sessionPin);
         if (!result.success) { alert(result.error || "Помилка списання"); return; }
 
         dispatch({ type: 'ADD_WRITEOFF', payload: result.data });
@@ -907,9 +1164,10 @@ const Inventory = ({ state, dispatch, isReadOnly, currentUser }) => {
   );
 };
 
-const UsersManager = ({ state, dispatch, currentUser }) => {
+const UsersManager = ({ state, dispatch, sessionPin }) => {
   const [formData, setFormData] = useState({ id: '', name: '', pin: '', role: 'user', permissions: ['inventory'] });
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const availablePermissions = [
     { id: 'dashboard', label: 'Дашборд (Аналітика)' },
@@ -929,9 +1187,11 @@ const UsersManager = ({ state, dispatch, currentUser }) => {
   const handleSave = async () => {
     if (!formData.name || formData.pin.length < 4) { alert("Введіть ім'я та ПІН-код (мінімум 4 цифри)"); return; }
     if (state.users.some(u => u.pin === formData.pin && u.id !== formData.id)) { alert("Цей ПІН-код вже використовується!"); return; }
+    if (isSaving) return;
 
+    setIsSaving(true);
     try {
-      const result = await callAction('saveUser', formData, currentUser?.pin);
+      const result = await callAction('saveUser', formData, sessionPin);
       if (!result.success) { alert(result.error || "Помилка збереження користувача"); return; }
       if (isEditing) dispatch({ type: 'UPDATE_USER', payload: result.data });
       else dispatch({ type: 'ADD_USER', payload: result.data });
@@ -939,11 +1199,12 @@ const UsersManager = ({ state, dispatch, currentUser }) => {
       setFormData({ id: '', name: '', pin: '', role: 'user', permissions: ['inventory'] });
       setIsEditing(false);
     } catch(e) { console.error(e); alert("Помилка збереження: немає з'єднання з сервером."); }
+    finally { setIsSaving(false); }
   };
 
   const handleDelete = async (id) => {
     try {
-      const result = await callAction('deleteUser', { id }, currentUser?.pin);
+      const result = await callAction('deleteUser', { id }, sessionPin);
       if (!result.success) { alert(result.error || "Помилка видалення користувача"); return; }
       dispatch({ type: 'DELETE_USER', payload: id });
     } catch(e) { console.error(e); alert("Помилка видалення: немає з'єднання з сервером."); }
@@ -978,7 +1239,7 @@ const UsersManager = ({ state, dispatch, currentUser }) => {
               </div>
             )}
           </div>
-          <button onClick={handleSave} className="w-full mt-6 bg-teal-600 hover:bg-teal-500 text-white font-bold py-3.5 rounded-xl transition-colors">{isEditing ? 'Оновити' : 'Створити ПІН'}</button>
+          <button onClick={handleSave} disabled={isSaving} className="w-full mt-6 bg-teal-600 hover:bg-teal-500 text-white font-bold py-3.5 rounded-xl transition-colors disabled:opacity-50">{isSaving ? 'Збереження...' : (isEditing ? 'Оновити' : 'Створити ПІН')}</button>
           {isEditing && <button onClick={() => {setIsEditing(false); setFormData({id:'',name:'',pin:'',role:'user',permissions:['inventory']})}} className="w-full mt-3 bg-slate-800 text-slate-300 font-bold py-3.5 rounded-xl">Скасувати</button>}
         </div>
 
@@ -1028,6 +1289,22 @@ const reducer = (state, action) => {
     case 'ADD_USER': return { ...state, users: [...state.users, action.payload] };
     case 'UPDATE_USER': return { ...state, users: state.users.map(u => u.id === action.payload.id ? action.payload : u) };
     case 'DELETE_USER': return { ...state, users: state.users.filter(u => u.id !== action.payload) };
+    case 'ADD_TEMPLATE':
+      return { ...state, templates: [...(state.templates||[]), action.payload.template], templateItems: [...(state.templateItems||[]), ...action.payload.items] };
+    case 'UPDATE_TEMPLATE': {
+      const { template, items } = action.payload;
+      return {
+        ...state,
+        templates: state.templates.map(t => t.id === template.id ? template : t),
+        templateItems: [...state.templateItems.filter(ti => ti.template_id !== template.id), ...items]
+      };
+    }
+    case 'DELETE_TEMPLATE':
+      return {
+        ...state,
+        templates: state.templates.filter(t => t.id !== action.payload),
+        templateItems: state.templateItems.filter(ti => ti.template_id !== action.payload)
+      };
     case 'ADD_WRITEOFF':
       return {
         ...state,
@@ -1066,53 +1343,73 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [pin, setPin] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
+  const [sessionPin, setSessionPin] = useState('');
 
-  const [state, dispatch] = React.useReducer(reducer, { materials: [], stock: [], operations: [], expenses: [], subcategories: [], writeoffs: [], users: [] });
+  const [state, dispatch] = React.useReducer(reducer, { materials: [], stock: [], operations: [], expenses: [], subcategories: [], writeoffs: [], users: [], templates: [], templateItems: [] });
   const [isLoaded, setIsLoaded] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [isCheckingPin, setIsCheckingPin] = useState(false);
+
+  const loadData = async (pinForAuth) => {
+    const data = await fetchAllData(pinForAuth);
+    dispatch({
+      type: 'INIT',
+      payload: {
+        materials: data.materials || [],
+        stock: data.stock || [],
+        operations: data.operations || [],
+        expenses: data.expenses || [],
+        subcategories: (data.subcategories && data.subcategories.length > 0) ? data.subcategories : DEFAULT_SUBCATEGORIES,
+        writeoffs: data.writeoffs || [],
+        users: data.users || [],
+        templates: data.templates || [],
+        templateItems: data.templateItems || []
+      }
+    });
+  };
 
   useEffect(() => {
-    async function fetchCloudData() {
+    (async () => {
       try {
-        const data = await fetchAllData();
-
-        dispatch({
-          type: 'INIT',
-          payload: {
-            materials: data.materials || [],
-            stock: data.stock || [],
-            operations: data.operations || [],
-            expenses: data.expenses || [],
-            subcategories: (data.subcategories && data.subcategories.length > 0) ? data.subcategories : DEFAULT_SUBCATEGORIES,
-            writeoffs: data.writeoffs || [],
-            users: data.users || []
-          }
-        });
+        await loadData();
         setIsLoaded(true);
       } catch (error) {
         console.error("Помилка завантаження даних:", error);
         setLoadError(error.message || "Невідома помилка з'єднання з Apps Script.");
       }
-    }
-    fetchCloudData();
+    })();
   }, []);
 
-  const handlePin = (val) => {
+  const handlePin = async (val) => {
      const newPin = pin + val;
      setPin(newPin);
+     if (newPin.length < 4 || isCheckingPin) return;
 
-     const foundUser = state.users.find(u => u.pin === newPin);
-
-     if (foundUser) {
-       setCurrentUser(foundUser);
-       setIsLocked(false);
-       setShowAuth(false);
-       setPin('');
-       if (foundUser.role === 'admin') setActiveTab('dashboard');
-       else setActiveTab(foundUser.permissions.includes('postop') ? 'postop' : 'inventory');
-     }
-     else if (newPin.length >= 4) {
+     setIsCheckingPin(true);
+     try {
+       // Звірка PIN тепер на сервері (Code.gs) — сюди більше не тягнемо повний
+       // список PIN-кодів наперед, лише результат "хто це і які права".
+       const result = await callAction('login', {}, newPin);
+       if (result.success) {
+         const foundUser = result.data;
+         setCurrentUser(foundUser);
+         setSessionPin(newPin);
+         setIsLocked(false);
+         setShowAuth(false);
+         setPin('');
+         if (foundUser.role === 'admin') setActiveTab('dashboard');
+         else setActiveTab(foundUser.permissions.includes('postop') ? 'postop' : 'inventory');
+         // Довантажуємо повніший зріз даних тепер, коли PIN підтверджено сервером
+         // (ІБ пацієнтів для будь-кого залогіненого; реальні PIN-и — лише для admin).
+         loadData(newPin).catch(e => console.error("Не вдалося довантажити дані після входу:", e));
+       } else {
+         setTimeout(() => setPin(''), 300);
+       }
+     } catch (e) {
+       console.error("Помилка перевірки PIN:", e);
        setTimeout(() => setPin(''), 300);
+     } finally {
+       setIsCheckingPin(false);
      }
   };
 
@@ -1148,13 +1445,13 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex justify-center items-center p-4">
            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl flex flex-col items-center animate-in zoom-in-95 duration-200">
               <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center mb-6 border border-slate-700 shadow-inner"><Lock size={32} className="text-teal-500"/></div>
-              <h2 className="text-xl font-bold text-white mb-6">Введіть PIN-код</h2>
+              <h2 className="text-xl font-bold text-white mb-6">{isCheckingPin ? 'Перевірка...' : 'Введіть PIN-код'}</h2>
               <div className="flex gap-4 mb-8">
                 {[0,1,2,3].map(i => <div key={i} className={`w-4 h-4 rounded-full transition-all ${pin.length > i ? 'bg-teal-500 scale-110 shadow-[0_0_10px_rgba(20,184,166,0.5)]' : 'bg-slate-800'}`}></div>)}
               </div>
               <div className="grid grid-cols-3 gap-4 w-full mb-6">
-                 {[1,2,3,4,5,6,7,8,9].map(num => <button key={num} onClick={()=>handlePin(num.toString())} className="h-16 bg-slate-800 hover:bg-slate-700 rounded-2xl text-2xl font-bold text-white transition-colors shadow-sm">{num}</button>)}
-                 <div className="col-start-2"><button onClick={()=>handlePin('0')} className="h-16 w-full bg-slate-800 hover:bg-slate-700 rounded-2xl text-2xl font-bold text-white transition-colors shadow-sm">0</button></div>
+                 {[1,2,3,4,5,6,7,8,9].map(num => <button key={num} disabled={isCheckingPin} onClick={()=>handlePin(num.toString())} className="h-16 bg-slate-800 hover:bg-slate-700 rounded-2xl text-2xl font-bold text-white transition-colors shadow-sm disabled:opacity-40">{num}</button>)}
+                 <div className="col-start-2"><button disabled={isCheckingPin} onClick={()=>handlePin('0')} className="h-16 w-full bg-slate-800 hover:bg-slate-700 rounded-2xl text-2xl font-bold text-white transition-colors shadow-sm disabled:opacity-40">0</button></div>
               </div>
               <button onClick={()=>{setShowAuth(false); setPin('');}} className="text-slate-500 hover:text-white text-sm font-bold">Скасувати</button>
            </div>
@@ -1181,7 +1478,10 @@ export default function App() {
                </div>
              )}
              <button onClick={()=>{
-                 if(!isLocked) { setIsLocked(true); setCurrentUser(null); setActiveTab('inventory'); }
+                 if(!isLocked) {
+                   setIsLocked(true); setCurrentUser(null); setSessionPin(''); setActiveTab('inventory');
+                   loadData().catch(e => console.error("Не вдалося оновити дані після виходу:", e));
+                 }
                  else { setShowAuth(true); }
              }} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-colors border ${isLocked ? 'bg-teal-500/10 text-teal-400 border-teal-500/20 hover:bg-teal-500/20' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}>
                 {isLocked ? <><Lock size={16}/> Увійти</> : <><Unlock size={16}/> {currentUser?.name.split(' ')[0]}</>}
@@ -1192,12 +1492,12 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10">
         {isLocked && activeTab !== 'inventory' && setActiveTab('inventory')}
-        {activeTab === 'dashboard' && hasAccess('dashboard') && <Dashboard state={state} dispatch={dispatch} currentUser={currentUser} />}
-        {activeTab === 'postop' && hasAccess('postop') && <PostOpExpense state={state} dispatch={dispatch} currentUser={currentUser} />}
-        {activeTab === 'stockin' && hasAccess('stockin') && <StockIn state={state} dispatch={dispatch} currentUser={currentUser} />}
-        {activeTab === 'catalog' && hasAccess('catalog') && <Catalog state={state} dispatch={dispatch} currentUser={currentUser} />}
-        {activeTab === 'inventory' && <Inventory state={state} dispatch={dispatch} isReadOnly={isLocked} currentUser={currentUser} />}
-        {activeTab === 'users' && currentUser?.role === 'admin' && <UsersManager state={state} dispatch={dispatch} currentUser={currentUser} />}
+        {activeTab === 'dashboard' && hasAccess('dashboard') && <Dashboard state={state} dispatch={dispatch} sessionPin={sessionPin} />}
+        {activeTab === 'postop' && hasAccess('postop') && <PostOpExpense state={state} dispatch={dispatch} sessionPin={sessionPin} />}
+        {activeTab === 'stockin' && hasAccess('stockin') && <StockIn state={state} dispatch={dispatch} sessionPin={sessionPin} />}
+        {activeTab === 'catalog' && hasAccess('catalog') && <Catalog state={state} dispatch={dispatch} sessionPin={sessionPin} />}
+        {activeTab === 'inventory' && <Inventory state={state} dispatch={dispatch} isReadOnly={isLocked} sessionPin={sessionPin} />}
+        {activeTab === 'users' && currentUser?.role === 'admin' && <UsersManager state={state} dispatch={dispatch} sessionPin={sessionPin} />}
       </main>
 
       {!isLocked && (
