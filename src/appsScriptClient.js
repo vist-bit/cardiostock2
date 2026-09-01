@@ -9,18 +9,28 @@
 // тіло однаково парситься як JSON через JSON.parse(e.postData.contents),
 // незалежно від заявленого Content-Type.
 
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzgvDMVSdhULfVeBbHcgsCgweMhYNpN0UDX4vSdXotIME7DEGdHn3wwn2h4Y6vbsUydIg/exec';
+const APPS_SCRIPT_URL = 'ВСТАВТЕ_СЮДИ_URL_ВЛАСНОГО_ДЕПЛОЮ_ЩО_ЗАКІНЧУЄТЬСЯ_НА_/exec';
 
 /**
- * Завантажує весь стан застосунку (materials, stock, operations, expenses,
+ * Завантажує стан застосунку (materials, stock, operations, expenses,
  * subcategories, writeoffs, users) одним запитом.
+ *
+ * pin — необов'язковий. Без нього сервер повертає "публічний" зріз (без
+ * ІБ пацієнтів у operations, без PIN-кодів у users) — саме це вантажиться
+ * при першому відкритті застосунку, ще до входу. Після успішного логіну
+ * виклич це ще раз з pin — сервер довантажить ІБ пацієнтів (для будь-якого
+ * залогіненого) і реальні PIN-и в users (лише якщо pin належить admin).
+ *
  * Кидає Error з людяним повідомленням при мережевій помилці або якщо
  * сервер повернув success:false.
  */
-async function fetchAllData() {
+async function fetchAllData(pin) {
   let res;
   try {
-    res = await fetch(`${APPS_SCRIPT_URL}?action=getAll`);
+    const url = pin
+      ? `${APPS_SCRIPT_URL}?action=getAll&pin=${encodeURIComponent(pin)}`
+      : `${APPS_SCRIPT_URL}?action=getAll`;
+    res = await fetch(url);
   } catch (networkErr) {
     throw new Error("Немає з'єднання з сервером Apps Script.");
   }
